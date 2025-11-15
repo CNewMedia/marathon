@@ -1,7 +1,6 @@
-// Netlify Function: Generate personalized training plan using Claude AI
+const https = require('https');
 
 exports.handler = async (event, context) => {
-  // CORS headers
   const headers = {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Headers': 'Content-Type',
@@ -9,132 +8,72 @@ exports.handler = async (event, context) => {
     'Content-Type': 'application/json'
   };
 
-  // Handle preflight
   if (event.httpMethod === 'OPTIONS') {
     return { statusCode: 200, headers, body: '' };
   }
 
   if (event.httpMethod !== 'POST') {
-    return {
-      statusCode: 405,
-      headers,
-      body: JSON.stringify({ error: 'Method not allowed' })
-    };
+    return { statusCode: 405, headers, body: JSON.stringify({ error: 'Method not allowed' }) };
   }
+
+  console.log('Generate plan function called');
 
   try {
     const { userData } = JSON.parse(event.body);
-    
-    // Call Claude API
-    const anthropicKey = process.env.ANTHROPIC_API_KEY;
-    
-    if (!anthropicKey) {
-      throw new Error('Anthropic API key not configured');
+    console.log('User data received:', { name: userData.name, age: userData.age });
+
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) {
+      throw new Error('API key not configured');
     }
 
-    const prompt = `Je bent een expert marathon coach. Genereer een VOLLEDIG gepersonaliseerd 45-weken trainingsschema voor de Loch Ness Marathon (27 september 2026) op basis van deze gegevens:
+    const prompt = `Je bent een expert marathon coach. Genereer een gepersonaliseerd 45-weken trainingsschema.
 
-PERSOONLIJKE GEGEVENS:
-- Naam: ${userData.name}
-- Leeftijd: ${userData.age} jaar
-- Geslacht: ${userData.gender}
-- Gewicht: ${userData.weight} kg
-- Lengte: ${userData.height} cm
+PERSOON: ${userData.name}, ${userData.age} jaar, ${userData.gender}
+NIVEAU: ${userData.experience}, ${userData.currentKmPerWeek} km/week
+DOEL: ${userData.goal === 'finish' ? 'Finishen' : 'Tijd: ' + userData.targetTime}
+BESCHIKBAAR: ${userData.sessionsPerWeek} trainingen/week
 
-SPORTIEVE ACHTERGROND:
-- Loop ervaring: ${userData.runningYears}
-- Huidig niveau: ${userData.experience}
-- Huidige km/week: ${userData.currentKmPerWeek} km
-- Langste recente loop: ${userData.longestRun} minuten
-- Eerdere marathons: ${userData.previousMarathons}
-${userData.previousMarathonTime ? `- Beste marathon tijd: ${userData.previousMarathonTime}` : ''}
+Maak 5 fases met per fase exacte trainingen. Return ALLEEN JSON:
 
-GEZONDHEID:
-${userData.injuries ? `- Blessures: ${userData.injuries}` : '- Geen bekende blessures'}
-${userData.medications ? `- Medicatie: ${userData.medications}` : '- Geen medicatie'}
-- Hartslagzones bekend: ${userData.heartRateZonesKnown ? 'Ja' : 'Nee'}
+{"phases":[{"name":"Fase 1 - Opbouw","weeks":[1,2,3,4],"description":"Basis leggen","weeklyMinutes":"150-180","workouts":[{"type":"Easy Run","description":"30 min rustig","day":"Maandag"},{"type":"Rest","description":"Rust","day":"Dinsdag"},{"type":"Easy Run","description":"35 min rustig","day":"Woensdag"},{"type":"Strength","description":"30 min kracht","day":"Donderdag"},{"type":"Rest","description":"Rust","day":"Vrijdag"},{"type":"Easy Run","description":"40 min rustig","day":"Zaterdag"},{"type":"Long Run","description":"50 min Z2","day":"Zondag"}]},{"name":"Fase 2","weeks":[5,6,7,8,9,10,11,12],"description":"Volume opbouwen","weeklyMinutes":"200-240","workouts":[{"type":"Easy","description":"45 min","day":"Maandag"},{"type":"Rest","description":"","day":"Dinsdag"},{"type":"Tempo","description":"40 min","day":"Woensdag"},{"type":"Strength","description":"30 min","day":"Donderdag"},{"type":"Rest","description":"","day":"Vrijdag"},{"type":"Easy","description":"50 min","day":"Zaterdag"},{"type":"Long","description":"75 min","day":"Zondag"}]},{"name":"Fase 3","weeks":[13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28],"description":"Uitbouwen","weeklyMinutes":"240-280","workouts":[{"type":"Easy","description":"60 min","day":"Maandag"},{"type":"Strength","description":"40 min","day":"Dinsdag"},{"type":"Tempo","description":"50 min","day":"Woensdag"},{"type":"Rest","description":"","day":"Donderdag"},{"type":"Easy","description":"45 min","day":"Vrijdag"},{"type":"Hills","description":"60 min","day":"Zaterdag"},{"type":"Long","description":"105 min","day":"Zondag"}]},{"name":"Fase 4","weeks":[29,30,31,32,33,34,35,36,37,38,39,40,41,42],"description":"Marathon specifiek","weeklyMinutes":"280-320","workouts":[{"type":"Easy","description":"60 min","day":"Maandag"},{"type":"Strength","description":"30 min","day":"Dinsdag"},{"type":"Tempo","description":"60 min MT","day":"Woensdag"},{"type":"Rest","description":"","day":"Donderdag"},{"type":"Easy","description":"45 min","day":"Vrijdag"},{"type":"Marathon Pace","description":"90 min MP","day":"Zaterdag"},{"type":"Long","description":"150-180 min","day":"Zondag"}]},{"name":"Fase 5 - Taper","weeks":[43,44,45],"description":"Afbouwen","weeklyMinutes":"Aflopend","workouts":[{"type":"Easy","description":"40 min","day":"Maandag"},{"type":"Rest","description":"","day":"Dinsdag"},{"type":"Tempo","description":"30 min","day":"Woensdag"},{"type":"Rest","description":"","day":"Donderdag"},{"type":"Easy","description":"20 min","day":"Vrijdag"},{"type":"Shakeout","description":"15 min","day":"Zaterdag"},{"type":"RACE","description":"Marathon!","day":"Zondag"}]}],"personalizedAdvice":"Focus op herstel en bouw geleidelijk op. Luister naar je lichaam."}`;
 
-BESCHIKBAARHEID:
-- Trainingen per week: ${userData.sessionsPerWeek}
-- Tijd per training: ~${userData.timePerSession} minuten
-- Loopomgeving: ${userData.runningEnvironment}
-
-DOELEN:
-- Hoofddoel: ${userData.goal === 'finish' ? 'Gezond finishen' : `Finish tijd: ${userData.targetTime}`}
-
-EXTRA:
-- Krachttraining ervaring: ${userData.strengthTraining ? 'Ja' : 'Nee'}
-- Cross-training: ${userData.crossTraining.join(', ') || 'Geen'}
-- Slaap: ${userData.sleepHours} uur/nacht
-
-Genereer een schema met 5 fases over 45 weken. Voor elke fase:
-1. Naam en beschrijving
-2. Welke weken
-3. Totale trainingstijd per week
-4. EXACTE trainingen per dag van de week
-
-Houd rekening met:
-- Leeftijd (meer herstel bij 40+)
-- Blessure geschiedenis (preventie!)
-- Beschikbaarheid (${userData.sessionsPerWeek} trainingen/week)
-- Doel (${userData.goal})
-- Cross-training mogelijkheden
-
-KRITISCH: Return ALLEEN valid JSON in dit formaat, NIETS anders:
-
-{
-  "phases": [
-    {
-      "name": "Fase 1 - [naam]",
-      "weeks": [1, 2, 3, 4],
-      "description": "[beschrijving]",
-      "weeklyMinutes": "[tijd]",
-      "workouts": [
-        {"type": "[type]", "description": "[detail]", "day": "Maandag"},
-        {"type": "[type]", "description": "[detail]", "day": "Dinsdag"},
-        ... (7 dagen)
-      ]
-    },
-    ... (5 fases totaal)
-  ],
-  "personalizedAdvice": "[3-4 specifieke tips voor deze persoon]"
-}`;
+    console.log('Calling Anthropic API...');
 
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'anthropic-version': '2023-06-01',
-        'x-api-key': anthropicKey
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01'
       },
       body: JSON.stringify({
         model: 'claude-sonnet-4-20250514',
         max_tokens: 4000,
-        messages: [{
-          role: 'user',
-          content: prompt
-        }]
+        messages: [{ role: 'user', content: prompt }]
       })
     });
 
     if (!response.ok) {
-      const error = await response.text();
-      console.error('Claude API error:', error);
-      throw new Error(`Claude API error: ${response.status}`);
+      const errorText = await response.text();
+      console.error('Anthropic error:', response.status, errorText);
+      throw new Error(`API error: ${response.status}`);
     }
 
     const data = await response.json();
-    const content = data.content[0].text;
+    console.log('Anthropic response received');
     
-    // Parse JSON from response
+    const content = data.content[0].text;
+    console.log('Content preview:', content.substring(0, 100));
+
     let plan;
     try {
-      // Remove markdown code blocks if present
-      const jsonMatch = content.match(/```json\n?([\s\S]*?)\n?```/) || content.match(/\{[\s\S]*\}/);
-      const jsonStr = jsonMatch ? (jsonMatch[1] || jsonMatch[0]) : content;
+      const jsonMatch = content.match(/\{[\s\S]*\}/);
+      const jsonStr = jsonMatch ? jsonMatch[0] : content;
       plan = JSON.parse(jsonStr);
-    } catch (parseError) {
-      console.error('JSON parse error:', parseError);
+      console.log('Plan parsed successfully');
+    } catch (e) {
+      console.error('Parse error:', e.message);
       console.error('Content:', content);
       throw new Error('Failed to parse AI response');
     }
@@ -142,20 +81,17 @@ KRITISCH: Return ALLEEN valid JSON in dit formaat, NIETS anders:
     return {
       statusCode: 200,
       headers,
-      body: JSON.stringify({ 
-        plan,
-        generated: new Date().toISOString()
-      })
+      body: JSON.stringify({ plan, generated: new Date().toISOString() })
     };
 
   } catch (error) {
-    console.error('Error:', error);
+    console.error('Function error:', error);
     return {
       statusCode: 500,
       headers,
       body: JSON.stringify({ 
         error: error.message,
-        details: 'Failed to generate training plan'
+        stack: error.stack
       })
     };
   }

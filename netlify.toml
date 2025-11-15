@@ -27,13 +27,3 @@
   for = "/*.css"
   [headers.values]
     Cache-Control = "public, max-age=31536000, immutable"
-
-# Environment variable replacement in JS files
-[[plugins]]
-  package = "@netlify/plugin-env"
-  
-  [plugins.inputs]
-    # Replace environment variables in config.js
-    [plugins.inputs.replace]
-      PUBLIC_SUPABASE_URL = "$VITE_SUPABASE_URL"
-      PUBLIC_SUPABASE_ANON_KEY = "$VITE_SUPABASE_ANON_KEY"

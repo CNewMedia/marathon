@@ -1,0 +1,27 @@
+{
+  "name": "loch-ness-marathon-trainer",
+  "version": "1.0.0",
+  "description": "AI-Powered Marathon Training Platform",
+  "main": "index.js",
+  "scripts": {
+    "dev": "netlify dev",
+    "build": "echo 'No build step needed for static site'",
+    "deploy": "netlify deploy --prod"
+  },
+  "keywords": [
+    "marathon",
+    "training",
+    "ai",
+    "claude",
+    "fitness"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.30.0",
+    "@supabase/supabase-js": "^2.39.0"
+  },
+  "devDependencies": {
+    "netlify-cli": "^17.0.0"
+  }
+}

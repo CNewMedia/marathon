@@ -130,7 +130,7 @@ async function signInWithGoogle() {
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
-        redirectTo: window.location.origin
+        redirectTo: 'https://loch-ness-marathon.netlify.app'
       }
     });
     if (error) throw error;
@@ -139,7 +139,6 @@ async function signInWithGoogle() {
     alert('Er ging iets mis met inloggen. Probeer het opnieuw.');
   }
 }
-
 async function handleLogout() {
   if (!confirm('Wil je uitloggen?')) return;
   try {

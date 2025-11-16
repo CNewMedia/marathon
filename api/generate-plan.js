@@ -12,524 +12,389 @@ exports.handler = async (event, context) => {
     return { statusCode: 200, headers, body: '' };
   }
 
-  console.log('Generate plan called with AI');
+  console.log('=== GENERATE PLAN CALLED ===');
 
   try {
     const { userData } = JSON.parse(event.body);
-    console.log('User:', userData.name, 'Sessions/week:', userData.sessionsPerWeek, 'Strength:', userData.strengthTraining);
+    console.log('User:', userData.name);
+    console.log('Sessions per week:', userData.sessionsPerWeek);
+    console.log('Strength training:', userData.strengthTraining);
     
-    // Initialize Claude API
-    const anthropic = new Anthropic({
-      apiKey: process.env.ANTHROPIC_API_KEY
-    });
-
-    // Calculate BMI and other metrics
-    const bmi = userData.weight && userData.height ? (userData.weight / Math.pow(userData.height / 100, 2)).toFixed(1) : 'unknown';
     const sessionsPerWeek = parseInt(userData.sessionsPerWeek) || 4;
+    const includeStrength = userData.strengthTraining === true;
     
-    // Build comprehensive context for Claude
-    const userContext = buildUserContext(userData, bmi, sessionsPerWeek);
-    
-    // Call Claude API to generate the plan
-    const message = await anthropic.messages.create({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 8000,
-      temperature: 0.7,
-      messages: [{
-        role: 'user',
-        content: generatePrompt(userContext, sessionsPerWeek, userData.strengthTraining)
-      }]
-    });
-
-    // Parse Claude's response
-    const responseText = message.content[0].text;
-    console.log('Claude response received, length:', responseText.length);
-    
-    // Extract JSON from response (Claude might wrap it in markdown)
-    let planData;
-    try {
-      // Try to find JSON in the response
-      const jsonMatch = responseText.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        planData = JSON.parse(jsonMatch[0]);
-      } else {
-        throw new Error('No JSON found in response');
+    // Try AI generation if API key is available
+    let plan;
+    if (process.env.ANTHROPIC_API_KEY) {
+      try {
+        console.log('Attempting AI generation...');
+        plan = await generateWithAI(userData, sessionsPerWeek, includeStrength);
+        console.log('AI generation successful');
+      } catch (aiError) {
+        console.error('AI generation failed:', aiError.message);
+        console.log('Falling back to rule-based plan');
+        plan = generateRuleBasedPlan(userData, sessionsPerWeek, includeStrength);
       }
-    } catch (parseError) {
-      console.error('Error parsing Claude response:', parseError);
-      // Fallback to rule-based plan if AI fails
-      planData = generateFallbackPlan(userData, sessionsPerWeek);
+    } else {
+      console.log('No API key, using rule-based plan');
+      plan = generateRuleBasedPlan(userData, sessionsPerWeek, includeStrength);
     }
 
-    // Ensure plan has correct structure
-    const validatedPlan = validateAndEnhancePlan(planData, userData, sessionsPerWeek);
-
-    console.log('Plan generated successfully');
+    console.log('Plan phases:', plan.phases.length);
+    console.log('Phase 1 workouts:', plan.phases[0].workouts.length);
 
     return {
       statusCode: 200,
       headers,
       body: JSON.stringify({ 
-        plan: validatedPlan,
+        plan, 
         generated: new Date().toISOString(),
-        aiGenerated: true
+        aiGenerated: !!process.env.ANTHROPIC_API_KEY
       })
     };
 
   } catch (error) {
-    console.error('Error:', error);
-    
-    // Fallback to rule-based plan on any error
-    try {
-      const { userData } = JSON.parse(event.body);
-      const sessionsPerWeek = parseInt(userData.sessionsPerWeek) || 4;
-      const fallbackPlan = generateFallbackPlan(userData, sessionsPerWeek);
-      
-      return {
-        statusCode: 200,
-        headers,
-        body: JSON.stringify({ 
-          plan: fallbackPlan,
-          generated: new Date().toISOString(),
-          aiGenerated: false,
-          note: 'Fallback plan generated due to API error'
-        })
-      };
-    } catch (fallbackError) {
-      return {
-        statusCode: 500,
-        headers,
-        body: JSON.stringify({ error: error.message })
-      };
-    }
+    console.error('Fatal error:', error);
+    return {
+      statusCode: 500,
+      headers,
+      body: JSON.stringify({ error: error.message })
+    };
   }
 };
 
-function buildUserContext(userData, bmi, sessionsPerWeek) {
-  return `
-Gebruiker: ${userData.name}
-Leeftijd: ${userData.age || 'onbekend'}
-Geslacht: ${userData.gender || 'onbekend'}
-Gewicht: ${userData.weight || 'onbekend'} kg
-Lengte: ${userData.height || 'onbekend'} cm
-BMI: ${bmi}
+// ============================================
+// AI GENERATION (if API key available)
+// ============================================
+async function generateWithAI(userData, sessionsPerWeek, includeStrength) {
+  const anthropic = new Anthropic({
+    apiKey: process.env.ANTHROPIC_API_KEY
+  });
 
-Loopervaring: ${userData.experience || 'onbekend'}
-Jaren gelopen: ${userData.runningYears || 'onbekend'}
-Huidige km per week: ${userData.currentKmPerWeek || 0} km
-Langste run ooit: ${userData.longestRun || 0} km
-Eerdere marathons: ${userData.previousMarathons || 0}
-Training geschiedenis: ${userData.trainingHistory || 'geen'}
+  const bmi = userData.weight && userData.height 
+    ? (userData.weight / Math.pow(userData.height / 100, 2)).toFixed(1) 
+    : 'unknown';
 
-Blessures: ${userData.injuries || 'geen'}
-Medicatie: ${userData.medications || 'geen'}
+  const prompt = `Je bent een marathon coach. Genereer een 45-weken trainingsschema voor de Loch Ness Marathon (27 sept 2026).
 
-Trainingsvoorkeuren:
-- Sessies per week: ${sessionsPerWeek}
-- Tijd per sessie: ${userData.timePerSession || 60} minuten
-- Krachttraining: ${userData.strengthTraining ? 'JA' : 'NEE'}
-- Slaapuren: ${userData.sleepHours || 7} uur
+GEBRUIKER:
+- Naam: ${userData.name}
+- Leeftijd: ${userData.age}, Gewicht: ${userData.weight}kg, Lengte: ${userData.height}cm, BMI: ${bmi}
+- Ervaring: ${userData.experience}
+- Huidige km/week: ${userData.currentKmPerWeek}
+- Doel: ${userData.goal === 'time' ? userData.targetTime : 'Finishen'}
+- Blessures: ${userData.injuries || 'geen'}
 
-Doel: ${userData.goal === 'time' ? `Tijd: ${userData.targetTime}` : 'Finishen'}
+VEREISTEN:
+- EXACT ${sessionsPerWeek} RUN trainingen per week
+- ${includeStrength ? 'Plus 2 krachttrainingen (Ma+Wo)' : 'GEEN krachttraining'}
+- Verdeel over: Zaterdag, Zondag, Maandag, Dinsdag, Woensdag, Donderdag, Vrijdag
+- Voeg 1-2 rustdagen toe
 
-Race: Loch Ness Marathon op 27 september 2026
-Startdatum training: 15 november 2025 (45 weken)
-  `.trim();
-}
+SCHEMA (5 FASES):
+1. Fase 1 (Week 1-4): Run-walk basis, 120-180 min/week
+2. Fase 2 (Week 5-12): Volume opbouw, 200-260 min/week  
+3. Fase 3 (Week 13-28): Uitbouwen, 240-300 min/week
+4. Fase 4 (Week 29-42): Marathon specifiek, 280-340 min/week
+5. Fase 5 (Week 43-45): Taper, Week 45 = RACE (zondag)
 
-function generatePrompt(userContext, sessionsPerWeek, includeStrength) {
-  return `Je bent een professionele marathon coach. Genereer een VOLLEDIG 45-weken trainingsschema voor de Loch Ness Marathon.
+BELANGRIJK VOOR ${sessionsPerWeek} SESSIES:
+- Prioriteit 1: Lange Duur (zondag) - ALTIJD
+- Prioriteit 2: Mid-week Long (zaterdag) 
+- Prioriteit 3: Tempo/Quality workout
+- Prioriteit 4+: Easy runs, strides
 
-GEBRUIKER INFORMATIE:
-${userContext}
-
-KRITIEKE VEREISTEN:
-1. Het schema moet EXACT ${sessionsPerWeek} RUN-trainingen per week bevatten
-2. ${includeStrength ? 'Voeg 2 krachttrainingen per week toe (Maandag en Woensdag of Donderdag)' : 'GEEN krachttrainingen'}
-3. Trainingen moeten verdeeld zijn over specifieke dagen: Zaterdag, Zondag, Maandag, Dinsdag, Woensdag, Donderdag, Vrijdag
-4. Elke week moet precies ${sessionsPerWeek} trainingen hebben (+ eventueel kracht)
-5. GEEN dubbele dagen, GEEN ontbrekende trainingen
-
-SCHEMA STRUCTUUR (5 FASES):
-
-FASE 1 (Week 1-4): "Basis Opbouw"
-- Run-walk methode
-- Volume: 120-180 minuten/week
-- Focus: Terug in beweging komen
-
-FASE 2 (Week 5-12): "Volume Opbouwen"  
-- Meer continue lopen
-- Volume: 200-260 minuten/week
-- Focus: 25-35 km/week
-
-FASE 3 (Week 13-28): "Uitbouwen"
-- Tempo runs introduceren
-- Volume: 240-300 minuten/week
-- Focus: 35-45 km/week
-
-FASE 4 (Week 29-42): "Marathon Specifiek"
-- Marathon pace trainingen
-- Volume: 280-340 minuten/week
-- Lange runs tot 3+ uur
-
-FASE 5 (Week 43-45): "Taper"
-- Volume afbouwen
-- Sharpness behouden
-- Week 45 = RACE WEEK (zondag 27 sept = marathon)
-
-TRAININGSTYPES PER SESSIEAANTAL:
-
-Voor ${sessionsPerWeek} sessies per week, gebruik deze verdeling:
-
-${sessionsPerWeek === 3 ? `
-3 SESSIES (Zaterdag, Zondag, Dinsdag of Woensdag):
-1. Lange Duur (Zondag) - Zone 2, bouwt op naar 3+ uur
-2. Tempo/Quality (midweek) - Intervals, tempo, of strides
-3. Easy Run (midweek of weekend) - Herstel
-` : ''}
-
-${sessionsPerWeek === 4 ? `
-4 SESSIES (Zaterdag, Zondag, Dinsdag, Donderdag):
-1. Lange Duur (Zondag) - Zone 2, bouwt op naar 3+ uur  
-2. Mid-week Long (Zaterdag) - 60-90min Z2
-3. Tempo/Quality (Dinsdag of Woensdag) - Intervals, tempo, strides
-4. Easy Run (Donderdag) - Herstel
-` : ''}
-
-${sessionsPerWeek === 5 ? `
-5 SESSIES (Zaterdag, Zondag, Dinsdag, Woensdag, Donderdag):
-1. Lange Duur (Zondag) - Zone 2, bouwt op naar 3+ uur
-2. Mid-week Long (Zaterdag) - 60-90min Z2  
-3. Tempo Run (Woensdag) - Marathon pace werk
-4. Easy Run (Dinsdag) - Herstel
-5. Strides (Donderdag) - Snelheid onderhouden
-` : ''}
-
-${sessionsPerWeek === 6 ? `
-6 SESSIES (Alle dagen behalve 1 rustdag):
-1. Lange Duur (Zondag) - Zone 2, bouwt op naar 3+ uur
-2. Mid-week Long (Zaterdag) - 60-90min Z2
-3. Tempo Run (Woensdag) - Marathon pace  
-4. Easy Run (Dinsdag) - Herstel
-5. Easy Run (Vrijdag) - Herstel
-6. Quality (Donderdag) - Intervals of strides
-` : ''}
-
-BELANGRIJK:
-- Week 45, Zondag 27 september = "RACE DAY - 🏃‍♂️ LOCH NESS MARATHON!"
-- Geef voor elke workout een Nederlandse beschrijving met duur en intensiteit
-- Gebruik Nederlandse termen: joggen, wandelen, tempo, rustig, etc.
-- Progressieve opbouw: start conservatief, bouw langzaam op
-- Laatste 2 weken (44-45) = taper met verminderd volume
-
-OUTPUT FORMAAT (JSON):
+Geef JSON:
 {
   "phases": [
     {
-      "name": "Fase 1 - Basis Opbouw",
-      "weeks": [1, 2, 3, 4],
-      "description": "Run-walk en basisconditie opbouwen",
+      "name": "Fase 1 - Basis",
+      "weeks": [1,2,3,4],
+      "description": "...",
       "weeklyMinutes": "120-180'",
       "workouts": [
-        {
-          "type": "Run-Walk",
-          "description": "10×(1' joggen / 2' wandelen). Start met 5' wandelen als warm-up.",
-          "day": "Zaterdag"
-        },
-        {
-          "type": "Lange Duur",
-          "description": "45-50' run-walk in zone 2. Wissel 3' joggen / 1' wandelen.",
-          "day": "Zondag"
-        }
-        // ... exact ${sessionsPerWeek} workouts
+        {"type": "Lange Duur", "description": "...", "day": "Zondag"},
+        {"type": "Easy Run", "description": "...", "day": "Dinsdag"},
+        {"type": "Rust", "description": "Rustdag", "day": "Woensdag"}
       ]
     }
-    // ... 5 phases totaal
   ],
-  "personalizedAdvice": "Voor [naam]: [specifiek advies gebaseerd op profiel]"
+  "personalizedAdvice": "..."
+}`;
+
+  const message = await anthropic.messages.create({
+    model: 'claude-sonnet-4-20250514',
+    max_tokens: 8000,
+    temperature: 0.7,
+    messages: [{ role: 'user', content: prompt }]
+  });
+
+  const responseText = message.content[0].text;
+  const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) throw new Error('No JSON in AI response');
+  
+  const plan = JSON.parse(jsonMatch[0]);
+  return validatePlan(plan, sessionsPerWeek, includeStrength);
 }
 
-Genereer nu het COMPLETE 45-weken schema in JSON formaat. Wees specifiek, praktisch en motiverend!`;
-}
-
-function generateFallbackPlan(userData, sessionsPerWeek) {
-  const includeStrength = userData.strengthTraining === true;
+// ============================================
+// RULE-BASED GENERATION (fallback)
+// ============================================
+function generateRuleBasedPlan(userData, sessionsPerWeek, includeStrength) {
+  console.log(`Generating rule-based plan: ${sessionsPerWeek} sessions, strength=${includeStrength}`);
   
   return {
     phases: [
-      generatePhase1(sessionsPerWeek, includeStrength),
-      generatePhase2(sessionsPerWeek, includeStrength),
-      generatePhase3(sessionsPerWeek, includeStrength),
-      generatePhase4(sessionsPerWeek, includeStrength),
-      generatePhase5(sessionsPerWeek, includeStrength)
+      buildPhase1(sessionsPerWeek, includeStrength),
+      buildPhase2(sessionsPerWeek, includeStrength),
+      buildPhase3(sessionsPerWeek, includeStrength),
+      buildPhase4(sessionsPerWeek, includeStrength),
+      buildPhase5(sessionsPerWeek, includeStrength)
     ],
-    personalizedAdvice: getPersonalizedAdvice(userData)
+    personalizedAdvice: getAdvice(userData)
   };
 }
 
-// DYNAMIC WORKOUT SELECTION based on sessions per week
-function selectWorkouts(allWorkouts, sessionsPerWeek, priorityOrder) {
-  // Priority order: which workouts are most important
-  const sorted = [...allWorkouts].sort((a, b) => {
-    const aPriority = priorityOrder.indexOf(a.type) !== -1 ? priorityOrder.indexOf(a.type) : 999;
-    const bPriority = priorityOrder.indexOf(b.type) !== -1 ? priorityOrder.indexOf(b.type) : 999;
-    return aPriority - bPriority;
+// ============================================
+// WORKOUT BUILDER - THE CORE LOGIC
+// ============================================
+function buildWeeklyPlan(runWorkouts, strengthWorkouts, sessionsPerWeek, includeStrength) {
+  console.log(`Building weekly plan: ${sessionsPerWeek} run sessions, strength=${includeStrength}`);
+  
+  let allWorkouts = [];
+  const usedDays = new Set();
+  
+  // Step 1: Add exactly sessionsPerWeek RUN workouts
+  const selectedRuns = runWorkouts.slice(0, sessionsPerWeek);
+  console.log(`Selected ${selectedRuns.length} run workouts:`, selectedRuns.map(w => w.type));
+  
+  selectedRuns.forEach(workout => {
+    allWorkouts.push(workout);
+    usedDays.add(workout.day);
   });
   
-  return sorted.slice(0, sessionsPerWeek);
+  // Step 2: Add strength if requested (max 2)
+  if (includeStrength) {
+    const strengthDayPreferences = ['Maandag', 'Woensdag', 'Donderdag', 'Vrijdag'];
+    let strengthAdded = 0;
+    
+    for (const preferredDay of strengthDayPreferences) {
+      if (strengthAdded >= 2) break;
+      if (!usedDays.has(preferredDay)) {
+        allWorkouts.push({
+          type: "Kracht",
+          description: strengthWorkouts[strengthAdded]?.description || "Krachttraining",
+          day: preferredDay
+        });
+        usedDays.add(preferredDay);
+        strengthAdded++;
+      }
+    }
+    console.log(`Added ${strengthAdded} strength workouts`);
+  }
+  
+  // Step 3: Add rest days (only if we have room in the week)
+  const allDays = ['Zaterdag', 'Zondag', 'Maandag', 'Dinsdag', 'Woensdag', 'Donderdag', 'Vrijdag'];
+  const availableDays = allDays.filter(d => !usedDays.has(d));
+  
+  // Add 1-2 rest days from available days
+  const restDaysToAdd = Math.min(2, availableDays.length);
+  for (let i = 0; i < restDaysToAdd; i++) {
+    allWorkouts.push({
+      type: "Rust",
+      description: "Volledige rustdag - essentieel voor herstel",
+      day: availableDays[i]
+    });
+    usedDays.add(availableDays[i]);
+  }
+  
+  // Step 4: Sort by day order
+  const dayOrder = ['Zaterdag', 'Zondag', 'Maandag', 'Dinsdag', 'Woensdag', 'Donderdag', 'Vrijdag'];
+  allWorkouts.sort((a, b) => dayOrder.indexOf(a.day) - dayOrder.indexOf(b.day));
+  
+  console.log(`Final workout count: ${allWorkouts.length}`);
+  console.log(`Days:`, allWorkouts.map(w => `${w.day}(${w.type})`).join(', '));
+  
+  return allWorkouts;
 }
 
-// FASE 1: Week 1-4
-function generatePhase1(sessionsPerWeek, includeStrength) {
-  const allRunWorkouts = [
-    { type: "Lange Duur", description: "45-50' run-walk in zone 2 (conversatietempo). Wissel 3' joggen / 1' wandelen.", day: "Zondag", priority: 1 },
-    { type: "Run-Walk", description: "10×(1' joggen / 2' wandelen). Start met 5' wandelen als warm-up.", day: "Zaterdag", priority: 2 },
-    { type: "Easy Run", description: "30' rustig joggen in zone 2. Tempo waarbij je nog kan praten.", day: "Dinsdag", priority: 3 },
-    { type: "Run-Walk", description: "8×(2' joggen / 2' wandelen). Constant comfortabel tempo.", day: "Donderdag", priority: 4 },
-    { type: "Strides", description: "25' rustig + 4×15\" strides. Accelereer tot 85% max snelheid.", day: "Vrijdag", priority: 5 },
-    { type: "Tempo", description: "35' waarvan 15' iets vlotter (conversatietempo+). Niet hard!", day: "Woensdag", priority: 6 }
+// ============================================
+// FASE 1: Week 1-4 - BASIS
+// ============================================
+function buildPhase1(sessionsPerWeek, includeStrength) {
+  // Define ALL possible run workouts for this phase, in priority order
+  const runWorkouts = [
+    { type: "Lange Duur", description: "45-50' run-walk in zone 2. Wissel 3' joggen / 1' wandelen.", day: "Zondag" },
+    { type: "Run-Walk", description: "10×(1' joggen / 2' wandelen). Start met 5' wandelen.", day: "Zaterdag" },
+    { type: "Easy Run", description: "30' rustig joggen in zone 2. Conversatietempo.", day: "Dinsdag" },
+    { type: "Run-Walk", description: "8×(2' joggen / 2' wandelen). Comfortabel tempo.", day: "Donderdag" },
+    { type: "Strides", description: "25' rustig + 4×15\" strides op 85% max snelheid.", day: "Vrijdag" },
+    { type: "Tempo", description: "35' waarvan 15' iets vlotter. Niet hard!", day: "Woensdag" }
   ];
   
-  const priorityOrder = ["Lange Duur", "Run-Walk", "Easy Run", "Strides", "Tempo"];
-  const selectedRuns = selectWorkouts(allRunWorkouts, sessionsPerWeek, priorityOrder);
-  
-  const strengthWorkouts = includeStrength ? [
-    { type: "Kracht", description: "30' - Core/stabiliteit: 3×12 squats, 3×10 lunges, 3×30\" plank, 3×15 glute bridges", day: "Maandag" },
-    { type: "Kracht", description: "30' - Full body: 3×12 deadlifts, 3×10 step-ups, 3×15 rows, 3×20 bicycle crunches", day: "Woensdag" }
-  ] : [];
+  const strengthWorkouts = [
+    { type: "Kracht", description: "30' - Core: 3×12 squats, 3×10 lunges, 3×30\" plank", day: "Maandag" },
+    { type: "Kracht", description: "30' - Full body: 3×12 deadlifts, 3×10 step-ups, 3×15 rows", day: "Woensdag" }
+  ];
   
   return {
     name: "Fase 1 - Basis Opbouw",
     weeks: [1, 2, 3, 4],
     description: "Run-walk en basisconditie opbouwen",
     weeklyMinutes: "120-180'",
-    workouts: assignDaysAndSort([...selectedRuns, ...strengthWorkouts], sessionsPerWeek)
+    workouts: buildWeeklyPlan(runWorkouts, strengthWorkouts, sessionsPerWeek, includeStrength)
   };
 }
 
-// FASE 2: Week 5-12
-function generatePhase2(sessionsPerWeek, includeStrength) {
-  const allRunWorkouts = [
-    { type: "Lange Duur", description: "75-90' in zone 2. Start rustig, oefen voeding/drinken.", day: "Zondag", priority: 1 },
-    { type: "Easy Run", description: "45-60' easy run in zone 2. Tempo waarbij je nog kan praten.", day: "Zaterdag", priority: 2 },
-    { type: "Z2 Duur", description: "50' comfortabel Z2 tempo. Laatste 10' mag iets vlotter.", day: "Dinsdag", priority: 3 },
-    { type: "Tempo", description: "45' totaal: 10' warm-up, 20' tempo (comfortably hard), 15' cool-down", day: "Woensdag", priority: 4 },
-    { type: "Strides", description: "40' easy + 6×20\" strides op 85-90% max snelheid.", day: "Donderdag", priority: 5 },
-    { type: "Easy Run", description: "35' herstelrun. Bewust langzaam, moet makkelijk aanvoelen.", day: "Vrijdag", priority: 6 }
+// ============================================
+// FASE 2: Week 5-12 - VOLUME
+// ============================================
+function buildPhase2(sessionsPerWeek, includeStrength) {
+  const runWorkouts = [
+    { type: "Lange Duur", description: "75-90' in zone 2. Start rustig, oefen voeding.", day: "Zondag" },
+    { type: "Easy Run", description: "45-60' easy run in zone 2. Conversatietempo.", day: "Zaterdag" },
+    { type: "Z2 Duur", description: "50' comfortabel Z2. Laatste 10' mag vlotter.", day: "Dinsdag" },
+    { type: "Tempo", description: "45' totaal: 10' warm-up, 20' tempo, 15' cool-down", day: "Woensdag" },
+    { type: "Strides", description: "40' easy + 6×20\" strides op 85-90% max.", day: "Donderdag" },
+    { type: "Easy Run", description: "35' herstelrun. Bewust langzaam.", day: "Vrijdag" }
   ];
   
-  const priorityOrder = ["Lange Duur", "Easy Run", "Z2 Duur", "Tempo", "Strides"];
-  const selectedRuns = selectWorkouts(allRunWorkouts, sessionsPerWeek, priorityOrder);
-  
-  const strengthWorkouts = includeStrength ? [
-    { type: "Kracht", description: "35' - Power: 3×15 squats, 3×12 deadlifts, 3×10 box jumps, 3×45\" planks", day: "Maandag" },
-    { type: "Kracht", description: "35' - Stabiliteit: 3×12 single-leg RDL, 3×10 Bulgarian splits, 3×20 mountain climbers", day: "Woensdag" }
-  ] : [];
+  const strengthWorkouts = [
+    { type: "Kracht", description: "35' - Power: 3×15 squats, 3×12 deadlifts, 3×10 box jumps", day: "Maandag" },
+    { type: "Kracht", description: "35' - Stabiliteit: 3×12 single-leg RDL, 3×10 Bulgarian splits", day: "Woensdag" }
+  ];
   
   return {
     name: "Fase 2 - Volume Opbouwen",
     weeks: [5, 6, 7, 8, 9, 10, 11, 12],
     description: "Opbouwen naar 25-35 km/week",
     weeklyMinutes: "200-260'",
-    workouts: assignDaysAndSort([...selectedRuns, ...strengthWorkouts], sessionsPerWeek)
+    workouts: buildWeeklyPlan(runWorkouts, strengthWorkouts, sessionsPerWeek, includeStrength)
   };
 }
 
-// FASE 3: Week 13-28
-function generatePhase3(sessionsPerWeek, includeStrength) {
-  const allRunWorkouts = [
-    { type: "Lange Duur", description: "105-120' zone 2. Laatste 20-30' mag vlotter. Oefen race voeding vanaf 90'.", day: "Zondag", priority: 1 },
-    { type: "Z2 Duur", description: "60-75' comfortabel Z2 tempo. Focus op constant ontspannen tempo.", day: "Zaterdag", priority: 2 },
-    { type: "Tempo Run", description: "50' totaal: 10' warm-up, 4×5' tempo run (~80-85% max HR), 2' tussen intervallen, 10' cool-down", day: "Woensdag", priority: 3 },
-    { type: "Easy Run", description: "45-60' herstelrun. Bewust langzaam! Voor herstel, niet training.", day: "Dinsdag", priority: 4 },
-    { type: "Progression", description: "60' start Z2, laatste 15-20' geleidelijk naar tempo pace", day: "Donderdag", priority: 5 },
-    { type: "Strides", description: "50' Z2 + 8×20\" strides. Houd Z2 comfortabel, strides scherp.", day: "Vrijdag", priority: 6 }
+// ============================================
+// FASE 3: Week 13-28 - UITBOUWEN
+// ============================================
+function buildPhase3(sessionsPerWeek, includeStrength) {
+  const runWorkouts = [
+    { type: "Lange Duur", description: "105-120' zone 2. Laatste 20-30' vlotter. Oefen race voeding vanaf 90'.", day: "Zondag" },
+    { type: "Z2 Duur", description: "60-75' comfortabel Z2. Focus op constant tempo.", day: "Zaterdag" },
+    { type: "Tempo Run", description: "50': 10' warm-up, 4×5' tempo (~80-85% max HR), 2' rust tussen, 10' cool-down", day: "Woensdag" },
+    { type: "Easy Run", description: "45-60' herstelrun. Bewust langzaam!", day: "Dinsdag" },
+    { type: "Progression", description: "60' start Z2, laatste 15-20' naar tempo pace", day: "Donderdag" },
+    { type: "Strides", description: "50' Z2 + 8×20\" strides. Z2 comfortabel, strides scherp.", day: "Vrijdag" }
   ];
   
-  const priorityOrder = ["Lange Duur", "Z2 Duur", "Tempo Run", "Easy Run", "Progression", "Strides"];
-  const selectedRuns = selectWorkouts(allRunWorkouts, sessionsPerWeek, priorityOrder);
-  
-  const strengthWorkouts = includeStrength ? [
-    { type: "Kracht", description: "35' - Heavy: 4×10 squats, 4×8 deadlifts, 3×10 lunges, 3×45\" plank, 3×20 hollow rocks", day: "Maandag" },
-    { type: "Kracht", description: "35' - Core: 3×12 single-leg RDL, 3×60\" plank variations, 3×15 leg raises, 3×20 pallof press", day: "Donderdag" }
-  ] : [];
+  const strengthWorkouts = [
+    { type: "Kracht", description: "35' - Heavy: 4×10 squats, 4×8 deadlifts, 3×10 lunges", day: "Maandag" },
+    { type: "Kracht", description: "35' - Core: 3×12 single-leg RDL, 3×60\" plank variations", day: "Donderdag" }
+  ];
   
   return {
     name: "Fase 3 - Uitbouwen",
     weeks: [13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28],
     description: "Opbouwen naar 35-45 km/week met meer structuur",
     weeklyMinutes: "240-300'",
-    workouts: assignDaysAndSort([...selectedRuns, ...strengthWorkouts], sessionsPerWeek)
+    workouts: buildWeeklyPlan(runWorkouts, strengthWorkouts, sessionsPerWeek, includeStrength)
   };
 }
 
-// FASE 4: Week 29-42
-function generatePhase4(sessionsPerWeek, includeStrength) {
-  const allRunWorkouts = [
-    { type: "Lange Duur", description: "2u45-3u15 - Key workout! Eerste 2u in Z2, laatste 30-45' aan marathon pace. Oefen race strategie!", day: "Zondag", priority: 1 },
-    { type: "Z2 Duur", description: "60-75' Z2, tweede helft mag progressive worden (start Z2, eindig vlotter maar niet MP)", day: "Zaterdag", priority: 2 },
-    { type: "Marathon Pace", description: "60-75' totaal: 15' warm-up, 2-3×15-20' aan MP met 5' rustig ertussen, 10' cool-down", day: "Donderdag", priority: 3 },
-    { type: "Tempo", description: "55' totaal: 10' warm-up, 3×10' tempo run, 3' tussen, 10' cool-down", day: "Woensdag", priority: 4 },
-    { type: "Z2 + Strides", description: "45-60' Z2 + 6-8×20\" strides. Z2 comfortabel, strides scherp maar ontspannen.", day: "Vrijdag", priority: 5 },
-    { type: "Easy Run", description: "30-40' herstelrun. Bewust langzaam, focus op techniek en ontspanning.", day: "Dinsdag", priority: 6 }
+// ============================================
+// FASE 4: Week 29-42 - MARATHON SPECIFIEK
+// ============================================
+function buildPhase4(sessionsPerWeek, includeStrength) {
+  const runWorkouts = [
+    { type: "Lange Duur", description: "2u45-3u15 - KEY! Eerste 2u Z2, laatste 30-45' marathon pace. Oefen race strategie!", day: "Zondag" },
+    { type: "Z2 Duur", description: "60-75' Z2, tweede helft progressive (niet MP!).", day: "Zaterdag" },
+    { type: "Marathon Pace", description: "60-75': 15' warm-up, 2-3×15-20' MP, 5' rust tussen, 10' cool-down", day: "Donderdag" },
+    { type: "Tempo", description: "55': 10' warm-up, 3×10' tempo, 3' tussen, 10' cool-down", day: "Woensdag" },
+    { type: "Z2 + Strides", description: "45-60' Z2 + 6-8×20\" strides. Scherp maar ontspannen.", day: "Vrijdag" },
+    { type: "Easy Run", description: "30-40' herstelrun. Focus op techniek en ontspanning.", day: "Dinsdag" }
   ];
   
-  const priorityOrder = ["Lange Duur", "Z2 Duur", "Marathon Pace", "Tempo", "Z2 + Strides", "Easy Run"];
-  const selectedRuns = selectWorkouts(allRunWorkouts, sessionsPerWeek, priorityOrder);
-  
-  const strengthWorkouts = includeStrength ? [
-    { type: "Kracht", description: "30' onderhoud - Lichte gewichten, mobiliteit: 3×12 goblet squats, 3×10 RDL, 3×15 calf raises, stretching", day: "Maandag" },
-    { type: "Kracht", description: "25' core - 3×45\" planks, 3×20 bicycle crunches, 3×15 leg raises, 2×30\" side planks", day: "Woensdag" }
-  ] : [];
+  const strengthWorkouts = [
+    { type: "Kracht", description: "30' onderhoud - Lichte gewichten: 3×12 goblet squats, 3×10 RDL", day: "Maandag" },
+    { type: "Kracht", description: "25' core - 3×45\" planks, 3×20 bicycle crunches, 3×15 leg raises", day: "Woensdag" }
+  ];
   
   return {
     name: "Fase 4 - Marathon Specifiek",
     weeks: [29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42],
     description: "Marathon pace integreren, 45-60 km/week",
     weeklyMinutes: "280-340'",
-    workouts: assignDaysAndSort([...selectedRuns, ...strengthWorkouts], sessionsPerWeek)
+    workouts: buildWeeklyPlan(runWorkouts, strengthWorkouts, sessionsPerWeek, includeStrength)
   };
 }
 
-// FASE 5: Week 43-45 (TAPER)
-function generatePhase5(sessionsPerWeek, includeStrength) {
-  const allRunWorkouts = [
-    { type: "RACE DAY", description: "🏃‍♂️ LOCH NESS MARATHON! Eerste helft rustig (< MP), tweede helft op gevoel. Geniet!", day: "Zondag", priority: 1 },
-    { type: "Easy Run", description: "30-40' ontspannen Z2. Veel lichter dan gewoonlijk. Je bouwt op energie!", day: "Dinsdag", priority: 2 },
-    { type: "Marathon Pace", description: "40' totaal: 10' warm-up, 3×5' aan MP (voelt licht!), 2' tussen, 10' cool-down. Scherpte behouden.", day: "Donderdag", priority: 3 },
-    { type: "Shakeout", description: "20-30' zeer licht joggen + 4-6×15\" strides. Laatste run voor marathon! Super makkelijk.", day: "Zaterdag", priority: 4 },
-    { type: "Easy Run", description: "25' zeer licht joggen. Focus op ontspanning en loopgevoel.", day: "Woensdag", priority: 5 }
+// ============================================
+// FASE 5: Week 43-45 - TAPER
+// ============================================
+function buildPhase5(sessionsPerWeek, includeStrength) {
+  // During taper, limit sessions
+  const taperSessions = Math.min(sessionsPerWeek, 4);
+  
+  const runWorkouts = [
+    { type: "RACE DAY", description: "🏃‍♂️ LOCH NESS MARATHON! Eerste helft rustig, tweede helft op gevoel. GENIET!", day: "Zondag" },
+    { type: "Easy Run", description: "30-40' ontspannen Z2. Veel lichter dan normaal. Energie opbouwen!", day: "Dinsdag" },
+    { type: "Marathon Pace", description: "40': 10' warm-up, 3×5' MP (voelt licht!), 2' tussen, 10' cool-down", day: "Donderdag" },
+    { type: "Shakeout", description: "20-30' zeer licht + 4-6×15\" strides. Laatste run voor marathon!", day: "Zaterdag" },
+    { type: "Easy Run", description: "25' zeer licht joggen. Focus op loopgevoel.", day: "Woensdag" }
   ];
   
-  // During taper, limit to max 5 sessions
-  const taperSessions = Math.min(sessionsPerWeek, 5);
-  const priorityOrder = ["RACE DAY", "Easy Run", "Marathon Pace", "Shakeout"];
-  const selectedRuns = selectWorkouts(allRunWorkouts, taperSessions, priorityOrder);
-  
-  const strengthWorkouts = includeStrength ? [
-    { type: "Kracht", description: "20' licht onderhoud - 2×10 squats, 2×10 lunges, 2×30\" planks, stretching. Geen zware gewichten!", day: "Maandag" }
-  ] : [];
+  const strengthWorkouts = [
+    { type: "Kracht", description: "20' licht - 2×10 squats, 2×10 lunges, 2×30\" planks. GEEN zware gewichten!", day: "Maandag" }
+  ];
   
   return {
     name: "Fase 5 - Taper",
     weeks: [43, 44, 45],
     description: "Volume afbouwen, frisheid behouden",
     weeklyMinutes: "Aflopend naar race",
-    workouts: assignDaysAndSort([...selectedRuns, ...strengthWorkouts], taperSessions)
+    workouts: buildWeeklyPlan(runWorkouts, strengthWorkouts, taperSessions, includeStrength)
   };
 }
 
-// HELPER: Assign days intelligently and sort
-function assignDaysAndSort(workouts, sessionsPerWeek) {
-  const dayOrder = ['Zaterdag', 'Zondag', 'Maandag', 'Dinsdag', 'Woensdag', 'Donderdag', 'Vrijdag'];
-  const availableDays = [...dayOrder];
-  const usedDays = new Set();
-  
-  // First pass: keep workouts that already have good days
-  workouts.forEach(w => {
-    if (w.day && availableDays.includes(w.day) && !usedDays.has(w.day)) {
-      usedDays.add(w.day);
-    }
-  });
-  
-  // Second pass: assign days to workouts without days or conflicts
-  workouts.forEach(w => {
-    if (!w.day || usedDays.has(w.day)) {
-      // Find next available day
-      const nextDay = availableDays.find(d => !usedDays.has(d));
-      if (nextDay) {
-        w.day = nextDay;
-        usedDays.add(nextDay);
-      }
-    }
-  });
-  
-  // Add rest days if needed (max 2)
-  const totalWorkouts = workouts.length;
-  if (totalWorkouts < 7 && totalWorkouts < sessionsPerWeek + 2) {
-    const restDaysNeeded = Math.min(2, 7 - totalWorkouts);
-    for (let i = 0; i < restDaysNeeded; i++) {
-      const restDay = availableDays.find(d => !usedDays.has(d));
-      if (restDay) {
-        workouts.push({ 
-          type: "Rust", 
-          description: "Volledige rustdag - essentieel voor herstel", 
-          day: restDay 
-        });
-        usedDays.add(restDay);
-      }
-    }
+// ============================================
+// VALIDATION
+// ============================================
+function validatePlan(plan, sessionsPerWeek, includeStrength) {
+  if (!plan.phases || plan.phases.length !== 5) {
+    throw new Error('Invalid plan structure');
   }
   
-  // Sort by day order
-  workouts.sort((a, b) => dayOrder.indexOf(a.day) - dayOrder.indexOf(b.day));
+  // Validate each phase
+  plan.phases.forEach((phase, idx) => {
+    if (!phase.workouts || phase.workouts.length === 0) {
+      console.warn(`Phase ${idx} invalid, regenerating`);
+      const builders = [buildPhase1, buildPhase2, buildPhase3, buildPhase4, buildPhase5];
+      plan.phases[idx] = builders[idx](sessionsPerWeek, includeStrength);
+    }
+  });
   
-  return workouts;
+  return plan;
 }
 
-function getPersonalizedAdvice(userData) {
-  const bmi = userData.weight && userData.height ? (userData.weight / Math.pow(userData.height / 100, 2)) : 0;
+// ============================================
+// PERSONALIZED ADVICE
+// ============================================
+function getAdvice(userData) {
+  const bmi = userData.weight && userData.height 
+    ? (userData.weight / Math.pow(userData.height / 100, 2)) 
+    : 0;
+  
   let advice = [];
   
-  if (bmi > 30) {
-    advice.push("Met je BMI is gewichtsbeheersing belangrijk - combineer training met gezonde voeding");
-  }
-  
-  if (userData.age > 50) {
-    advice.push("Extra focus op herstel en mobiliteit - neem rustdagen serieus");
-  }
-  
-  if (userData.experience === 'beginner') {
-    advice.push("Bouw rustig op - consistentie is belangrijker dan snelheid");
-  }
-  
-  if (userData.injuries) {
-    advice.push("Let extra op blessure preventie - warm goed op en stretch na trainingen");
-  }
-  
-  if (userData.trainingHistory && userData.trainingHistory.toLowerCase().includes('gestopt')) {
-    advice.push("Na een rustperiode is extra voorzichtig opbouwen cruciaal");
-  }
-  
-  if (userData.goal === 'time' && userData.targetTime) {
-    advice.push(`Voor je ${userData.targetTime} doel: focus op tempo runs en marathon pace trainingen in fase 3-4`);
-  }
-  
-  if (userData.strengthTraining) {
-    advice.push("Krachttraining 2x per week helpt bij blessurepreventie en loopefficiëntie");
-  } else {
-    advice.push("Overweeg in de toekomst krachttraining toe te voegen voor betere resultaten");
-  }
+  if (bmi > 30) advice.push("Focus op gewichtsbeheersing via gezonde voeding");
+  if (userData.age > 50) advice.push("Extra focus op herstel - neem rustdagen serieus");
+  if (userData.experience === 'beginner') advice.push("Bouw rustig op - consistentie > snelheid");
+  if (userData.injuries) advice.push("Let op blessurepreventie - warm goed op");
+  if (userData.goal === 'time') advice.push(`Voor je ${userData.targetTime} doel: focus op tempo runs in fase 3-4`);
+  if (userData.strengthTraining) advice.push("Krachttraining helpt bij blessurepreventie");
   
   if (advice.length === 0) {
-    advice.push("Luister naar je lichaam, geniet van het proces en blijf consistent");
+    advice.push("Luister naar je lichaam en geniet van het proces");
   }
   
   return `Voor ${userData.name}: ${advice.join('. ')}.`;
-}
-
-function validateAndEnhancePlan(planData, userData, sessionsPerWeek) {
-  // Ensure all phases exist
-  if (!planData.phases || planData.phases.length !== 5) {
-    console.warn('Invalid plan structure, using fallback');
-    return generateFallbackPlan(userData, sessionsPerWeek);
-  }
-  
-  // Validate each phase has correct number of workouts
-  planData.phases.forEach((phase, idx) => {
-    if (!phase.workouts || phase.workouts.length === 0) {
-      console.warn(`Phase ${idx + 1} has no workouts, regenerating`);
-      // Regenerate this phase
-      const phaseFunctions = [generatePhase1, generatePhase2, generatePhase3, generatePhase4, generatePhase5];
-      const regenerated = phaseFunctions[idx](sessionsPerWeek, userData.strengthTraining);
-      planData.phases[idx] = regenerated;
-    }
-  });
-  
-  // Ensure personalized advice exists
-  if (!planData.personalizedAdvice) {
-    planData.personalizedAdvice = getPersonalizedAdvice(userData);
-  }
-  
-  return planData;
 }

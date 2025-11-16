@@ -12,6 +12,15 @@
     <!-- Styles -->
     <link rel="stylesheet" href="styles.css">
 </head>
+<script>
+// Debug auth flow
+window.addEventListener('load', () => {
+  const hash = window.location.hash;
+  if (hash && hash.includes('access_token')) {
+    console.log('Auth callback received!');
+  }
+});
+</script>
 <body>
     <div id="app">
         <!-- Content loaded by app.js -->

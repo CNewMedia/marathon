@@ -287,12 +287,8 @@ function startOnboarding() {
   showOnboardingStep(1);
 }
 
+// ===== ONBOARDING STEPS =====
 
-// ===== ONBOARDING (Stap 1-6 - verkort voor ruimte) =====
-// [Je huidige onboarding code blijft hetzelfde - ik focus op de fixes]
-
-function showOnboardingStep(step) {
-// Insert this into showOnboardingStep function
 function showOnboardingStep(step) {
   currentStep = step;
   const steps = ['Persoonlijk', 'Sportief', 'Historiek', 'Gezondheid', 'Beschikbaarheid', 'Doelen', 'Overzicht'];

@@ -5,6 +5,7 @@ let completedWorkouts = new Set();
 let currentWeekNumber = 1;
 let currentStep = 1;
 let generatedPlan = null;
+let currentUser = null;
 
 let userData = {
   name: '', age: '', gender: '', weight: '', height: '',
@@ -18,18 +19,65 @@ let userData = {
   crossTraining: [], strengthTraining: false, nutritionPlan: false, sleepHours: 7
 };
 
-document.addEventListener('DOMContentLoaded', () => {
-  loadProgress();
-  showWelcome();
+document.addEventListener('DOMContentLoaded', async () => {
+  // Check if user is logged in
+  const { data: { session } } = await supabase.auth.getSession();
+  
+  if (session) {
+    currentUser = session.user;
+    await loadUserData();
+    
+    if (generatedPlan) {
+      showDashboard();
+    } else {
+      showWelcome();
+    }
+  } else {
+    showLoginScreen();
+  }
+
+  // Listen for auth state changes
+  supabase.auth.onAuthStateChange(async (event, session) => {
+    if (event === 'SIGNED_IN' && session) {
+      currentUser = session.user;
+      await loadUserData();
+      
+      if (generatedPlan) {
+        showDashboard();
+      } else {
+        showWelcome();
+      }
+    } else if (event === 'SIGNED_OUT') {
+      currentUser = null;
+      showLoginScreen();
+    }
+  });
 });
 
 function saveProgress() {
+  // Always save to localStorage as backup
   localStorage.setItem('marathonProgress', JSON.stringify({
     completedWorkouts: Array.from(completedWorkouts),
     currentWeek: currentWeekNumber,
     userData,
     generatedPlan
   }));
+  
+  // Also save to Supabase if logged in
+  if (currentUser && generatedPlan) {
+    supabase.from('training_plans')
+      .upsert({
+        user_id: currentUser.id,
+        plan_data: generatedPlan,
+        current_week: currentWeekNumber,
+        updated_at: new Date().toISOString()
+      }, {
+        onConflict: 'user_id'
+      })
+      .then(({ error }) => {
+        if (error) console.error('Error saving to Supabase:', error);
+      });
+  }
 }
 
 function loadProgress() {
@@ -40,6 +88,125 @@ function loadProgress() {
     currentWeekNumber = progress.currentWeek || 1;
     if (progress.userData) userData = progress.userData;
     if (progress.generatedPlan) generatedPlan = progress.generatedPlan;
+  }
+}
+
+function showLoginScreen() {
+  document.getElementById('app').innerHTML = `
+    <div class="welcome-screen">
+      <div class="welcome-card" style="max-width: 450px;">
+        <div class="logo">🏃‍♂️</div>
+        <h1>Loch Ness Marathon Trainer</h1>
+        <p class="subtitle">AI-Powered Persoonlijk Trainingsschema</p>
+        
+        <div style="margin: 40px 0;">
+          <p style="text-align: center; color: var(--text-secondary); margin-bottom: 30px;">
+            Log in om je trainingsschema te starten en je progressie bij te houden op al je devices.
+          </p>
+          
+          <button class="btn-google" onclick="signInWithGoogle()">
+            <svg width="18" height="18" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" style="margin-right: 12px;">
+              <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
+              <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
+              <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>
+              <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
+            </svg>
+            Inloggen met Google
+          </button>
+        </div>
+        
+        <div style="text-align: center; margin-top: 30px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.1);">
+          <p style="font-size: 0.85em; color: var(--text-secondary);">
+            Door in te loggen ga je akkoord met onze voorwaarden
+          </p>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+async function signInWithGoogle() {
+  try {
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo: 'https://loch-ness-marathon.netlify.app'
+      }
+    });
+    if (error) throw error;
+  } catch (error) {
+    console.error('Error signing in:', error);
+    alert('Er ging iets mis met inloggen. Probeer het opnieuw.');
+  }
+}
+async function handleLogout() {
+  if (!confirm('Wil je uitloggen?')) return;
+  try {
+    await supabase.auth.signOut();
+  } catch (error) {
+    console.error('Error signing out:', error);
+  }
+}
+
+async function loadUserData() {
+  if (!currentUser) {
+    loadProgress();
+    return;
+  }
+  
+  try {
+    // Load user profile
+    const { data: profile } = await supabase
+      .from('user_profiles')
+      .select('*')
+      .eq('id', currentUser.id)
+      .single();
+    
+    if (profile) {
+      userData.name = profile.name || currentUser.user_metadata?.full_name || currentUser.email.split('@')[0];
+      userData.age = profile.age || '';
+      userData.gender = profile.gender || '';
+      userData.weight = profile.weight || '';
+      userData.height = profile.height || '';
+      userData.experience = profile.experience || '';
+    } else {
+      // Create new profile
+      userData.name = currentUser.user_metadata?.full_name || currentUser.email.split('@')[0];
+      
+      await supabase.from('user_profiles').insert([{
+        id: currentUser.id,
+        email: currentUser.email,
+        name: userData.name,
+        created_at: new Date().toISOString()
+      }]);
+    }
+    
+    // Load training plan
+    const { data: plans } = await supabase
+      .from('training_plans')
+      .select('*')
+      .eq('user_id', currentUser.id)
+      .order('created_at', { ascending: false })
+      .limit(1);
+    
+    if (plans && plans.length > 0) {
+      generatedPlan = plans[0].plan_data;
+      currentWeekNumber = plans[0].current_week || 1;
+    }
+    
+    // Load workout progress
+    const { data: progress } = await supabase
+      .from('workout_progress')
+      .select('week_number, workout_day')
+      .eq('user_id', currentUser.id)
+      .eq('completed', true);
+    
+    if (progress) {
+      completedWorkouts = new Set(progress.map(p => `${p.week_number}-${p.workout_day}`));
+    }
+  } catch (error) {
+    console.error('Error loading user data:', error);
+    loadProgress(); // Fallback to localStorage
   }
 }
 
@@ -55,6 +222,12 @@ function showWelcome() {
   document.getElementById('app').innerHTML = `
     <div class="welcome-screen">
       <div class="welcome-card">
+        ${currentUser ? `
+          <div class="user-menu">
+            <span class="user-menu-name">👋 ${userData.name}</span>
+            <button class="btn-logout" onclick="handleLogout()">Uitloggen</button>
+          </div>
+        ` : ''}
         <div class="logo">🏃‍♂️</div>
         <h1>Loch Ness Marathon Trainer</h1>
         <p class="subtitle">AI-Powered Persoonlijk Trainingsschema</p>
@@ -434,6 +607,12 @@ function showDashboard() {
   document.getElementById('app').innerHTML = `
     <div class="container">
       <div class="header">
+        ${currentUser ? `
+          <div class="user-menu">
+            <span class="user-menu-name">👋 ${userData.name}</span>
+            <button class="btn-logout" onclick="handleLogout()">Uitloggen</button>
+          </div>
+        ` : ''}
         <h1>🏃‍♂️ Loch Ness Marathon Trainer Pro</h1>
         <p class="subtitle">Je AI-gegenereerde 45-weken trainingsschema</p>
         <div class="race-info">
@@ -606,14 +785,42 @@ function closeModal() {
   document.getElementById('weekModal').classList.remove('active');
 }
 
-function toggleWorkout(workoutId, event) {
+async function toggleWorkout(workoutId, event) {
   event.stopPropagation();
-  if (completedWorkouts.has(workoutId)) completedWorkouts.delete(workoutId);
-  else completedWorkouts.add(workoutId);
+  const [weekNum, day] = workoutId.split('-');
+  
+  if (completedWorkouts.has(workoutId)) {
+    completedWorkouts.delete(workoutId);
+    
+    // Delete from Supabase if logged in
+    if (currentUser) {
+      await supabase.from('workout_progress').delete()
+        .eq('user_id', currentUser.id)
+        .eq('week_number', parseInt(weekNum))
+        .eq('workout_day', day);
+    }
+  } else {
+    completedWorkouts.add(workoutId);
+    
+    // Save to Supabase if logged in
+    if (currentUser) {
+      const phase = getPhaseForWeek(parseInt(weekNum));
+      const workout = phase?.workouts.find(w => w.day === day);
+      
+      await supabase.from('workout_progress').insert([{
+        user_id: currentUser.id,
+        week_number: parseInt(weekNum),
+        workout_day: day,
+        workout_type: workout?.type || '',
+        completed: true,
+        completed_at: new Date().toISOString()
+      }]);
+    }
+  }
+  
   saveProgress();
-  const weekNum = parseInt(workoutId.split('-')[0]);
   showDashboard();
-  setTimeout(() => openWeekModal(weekNum), 100);
+  setTimeout(() => openWeekModal(parseInt(weekNum)), 100);
 }
 
 function markWeekComplete(weekNum) {

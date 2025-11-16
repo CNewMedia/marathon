@@ -510,53 +510,37 @@ function goToStep(step) {
 }
 
 async function generateAIPlan() {
-  // Show loading screen
   document.getElementById('app').innerHTML = `
     <div style="min-height: 100vh; display: flex; align-items: center; justify-content: center; background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%); color: #eee; padding: 20px;">
       <div style="background: rgba(255, 255, 255, 0.1); backdrop-filter: blur(10px); border-radius: 20px; padding: 40px; max-width: 600px; text-align: center; border: 1px solid rgba(255, 255, 255, 0.2);">
         <div style="width: 80px; height: 80px; border: 6px solid rgba(255, 255, 255, 0.1); border-top-color: #4ecca3; border-radius: 50%; animation: spin 1s linear infinite; margin: 0 auto 30px;"></div>
-        <div style="font-size: 1.5em; color: #4ecca3; margin-bottom: 10px;">
-          🤖 AI genereert jouw schema...
-        </div>
-        <div style="color: #aaa; margin-bottom: 20px;">Dit kan 10-20 seconden duren</div>
-        
-        <div style="text-align: left; background: rgba(78, 204, 163, 0.1); padding: 20px; border-radius: 10px; border: 1px solid #4ecca3;">
-          <strong style="color: #4ecca3;">Claude AI analyseert:</strong><br>
-          <ul style="margin: 10px 0 0 20px; line-height: 1.8;">
-            <li>Je persoonlijke gegevens en conditie</li>
-            <li>Sportieve achtergrond en ervaring</li>
-            <li>Beschikbaarheid en voorkeuren</li>
-            <li>Doelstellingen voor Loch Ness 2026</li>
-            <li>Blessure risico's en preventie</li>
-          </ul>
-        </div>
+        <div style="font-size: 1.5em; color: #4ecca3; margin-bottom: 10px;">🤖 AI genereert jouw schema...</div>
       </div>
     </div>
     <style>@keyframes spin { to { transform: rotate(360deg); } }</style>
   `;
   
   try {
-    // Call Netlify Function for AI generation
+    const requestBody = JSON.stringify({ userData: userData });
+    console.log('Request body:', requestBody);
+    
     const response = await fetch('/.netlify/functions/generate-plan', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userData })
+      body: requestBody
     });
     
-    if (!response.ok) {
-      throw new Error('Failed to generate plan');
-    }
+    const responseText = await response.text();
+    console.log('Response:', responseText);
     
-    const data = await response.json();
+    const data = JSON.parse(responseText);
+    
     generatedPlan = data.plan;
-    
     saveProgress();
     showDashboard();
     
   } catch (error) {
-    console.error('Error generating plan:', error);
-    // Fallback: use demo plan
-    alert('AI generatie tijdelijk niet beschikbaar. We gebruiken een standaard schema.');
+    console.error('Error:', error);
     generatedPlan = createDemoPlan();
     saveProgress();
     showDashboard();

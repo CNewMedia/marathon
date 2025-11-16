@@ -79,7 +79,8 @@ async function saveProgress() {
         await supabase.from('training_plans').insert([{
           user_id: currentUser.id,
           plan_data: generatedPlan,
-          current_week: currentWeekNumber
+          current_week: currentWeekNumber,
+          created_at: new Date().toISOString()
         }]);
       }
       
@@ -127,7 +128,8 @@ async function loadUserData() {
       await supabase.from('user_profiles').insert([{
         id: currentUser.id,
         email: currentUser.email,
-        name: userData.name
+        name: userData.name,
+        created_at: new Date().toISOString()
       }]);
     }
     
@@ -703,7 +705,7 @@ async function toggleWorkout(workoutId, event) {
         workout_day: day,
         workout_type: workout?.type || '',
         completed: true,
-        completed_at: new Date().toISOString().replace('T', ' ').slice(0, 19)
+        completed_at: new Date().toISOString()
       }]);
     }
   }

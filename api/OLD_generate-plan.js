@@ -75,146 +75,52 @@ async function generateWithAI(userData, sessionsPerWeek, includeStrength) {
     ? (userData.weight / Math.pow(userData.height / 100, 2)).toFixed(1) 
     : 'unknown';
 
-  const prompt = `Je bent een professionele marathon coach met kennis van Hal Higdon, Pfitzinger en Jack Daniels trainingsmethoden.
+  const prompt = `Je bent een marathon coach. Genereer een 45-weken trainingsschema voor de Loch Ness Marathon (27 sept 2026).
 
-Genereer een wetenschappelijk onderbouwd 45-weken trainingsschema voor de Loch Ness Marathon.
-
-KRITIEKE INFORMATIE:
-- Race datum: 27 september 2026 (zondag) - WEEK 45, DAG ZONDAG
-- Start training: 15 november 2025 (zaterdag) - WEEK 1
-- Totaal: EXACT 45 weken
-
-GEBRUIKERSPROFIEL:
+GEBRUIKER:
 - Naam: ${userData.name}
-- Leeftijd: ${userData.age} jaar
-- Gewicht: ${userData.weight}kg, Lengte: ${userData.height}cm, BMI: ${bmi}
-- Loopervaring: ${userData.experience}
-- Huidige km/week: ${userData.currentKmPerWeek} km
-- Langste run ooit: ${userData.longestRun} km
-- Eerdere marathons: ${userData.previousMarathons}
+- Leeftijd: ${userData.age}, Gewicht: ${userData.weight}kg, Lengte: ${userData.height}cm, BMI: ${bmi}
+- Ervaring: ${userData.experience}
+- Huidige km/week: ${userData.currentKmPerWeek}
+- Doel: ${userData.goal === 'time' ? userData.targetTime : 'Finishen'}
 - Blessures: ${userData.injuries || 'geen'}
-- Doel: ${userData.goal === 'time' ? `Finish in ${userData.targetTime}` : 'Veilig finishen'}
 
-TRAININGSVOORKEUREN:
-- Aantal run sessies per week: ${sessionsPerWeek}
-- Krachttraining: ${includeStrength ? 'JA - 2x per week (Ma+Wo/Do)' : 'NEE'}
-- Beschikbare tijd per sessie: ~${userData.timePerSession || 60} minuten
+VEREISTEN:
+- EXACT ${sessionsPerWeek} RUN trainingen per week
+- ${includeStrength ? 'Plus 2 krachttrainingen (Ma+Wo)' : 'GEEN krachttraining'}
+- Verdeel over: Zaterdag, Zondag, Maandag, Dinsdag, Woensdag, Donderdag, Vrijdag
+- Voeg 1-2 rustdagen toe
 
-PROFESSIONELE RICHTLIJNEN:
-1. PROGRESSIE: 10% regel - verhoog volume max 10% per week
-2. HARD/EASY: Na elke zware dag volgt een rustige dag of rustdag
-3. LONG RUN: Zondag = lange duur (build naar 3+ uur in fase 4)
-4. WEEKEND: Back-to-back is OK (Za mid-long + Zo long = marathon-specifiek)
-5. RECOVERY: Minimaal 1 volledige rustdag per week (niet tonen in schema!)
-6. TAPER: Laatste 2-3 weken volume -40% maar intensiteit behouden
+SCHEMA (5 FASES):
+1. Fase 1 (Week 1-4): Run-walk basis, 120-180 min/week
+2. Fase 2 (Week 5-12): Volume opbouw, 200-260 min/week  
+3. Fase 3 (Week 13-28): Uitbouwen, 240-300 min/week
+4. Fase 4 (Week 29-42): Marathon specifiek, 280-340 min/week
+5. Fase 5 (Week 43-45): Taper, Week 45 = RACE (zondag)
 
-WORKOUT TYPES (gebaseerd op Jack Daniels):
-- Easy Run (Zone 2): Conversatietempo, 60-70% max HR
-- Long Run (Zone 2): 90-180+ minuten, aerobe base
-- Tempo Run (Zone 3): Comfortably hard, 80-85% max HR, 20-40 min
-- Marathon Pace (MP): Race tempo, laatste 8-12 weken
-- Intervals: 400m-1km repeats, VO2max werk
-- Strides: 15-20 sec @ 90% max, techniek + snelheid
+BELANGRIJK VOOR ${sessionsPerWeek} SESSIES:
+- Prioriteit 1: Lange Duur (zondag) - ALTIJD
+- Prioriteit 2: Mid-week Long (zaterdag) 
+- Prioriteit 3: Tempo/Quality workout
+- Prioriteit 4+: Easy runs, strides
 
-SCHEMA STRUCTUUR (5 FASES):
-
-FASE 1 (Week 1-4) - "Basis Leggen"
-- Doel: Gewenning, run-walk methode voor beginners
-- Volume: 120-180 min/week
-- Focus: Blessurepreventie, techniek
-- Voor ${sessionsPerWeek} sessies: Lange run (Zo) + easy runs
-
-FASE 2 (Week 5-12) - "Aerobe Base"
-- Doel: Volume opbouwen naar 25-35 km/week
-- Volume: 200-260 min/week
-- Focus: Zone 2 werk, endurance
-- Introduce: Strides (1x/week), eerste tempo runs
-- Long run build: 75 → 105 minuten
-
-FASE 3 (Week 13-28) - "Volume Peak"
-- Doel: 35-50 km/week, sterke aerobe base
-- Volume: 240-300 min/week
-- Focus: Long runs (105-135 min), tempo runs
-- Workout patroon: Za mid-long (60-75) + Zo long (105-135) + Wo tempo
-- Voor ${sessionsPerWeek} sessies: Prioriteer long runs + 1 quality
-
-FASE 4 (Week 29-42) - "Marathon Specifiek"
-- Doel: Race-ready, marathon pace integreren
-- Volume: Peak 50-65 km/week (week 36-38)
-- Focus: Long runs met MP finish, MP workouts
-- KEY WORKOUTS:
-  * Zo: 2u45-3u15 (laatste 30-60' aan MP)
-  * Za: 60-90' easy/progressive
-  * Midweek: 2-3x 15-20' @ MP
-- Voor ${sessionsPerWeek} sessies: Long run + MP workout + easy runs
-
-FASE 5 (Week 43-45) - "Taper"
-- Week 43: -20% volume
-- Week 44: -40% volume
-- Week 45: Mini runs, RACE ZONDAG 27 SEPTEMBER
-- Behoud: 1-2 MP intervals (kort!), strides
-- Doel: Fris en scherp aan start
-
-WORKOUT VERDELING VOOR ${sessionsPerWeek} SESSIES:
-${sessionsPerWeek === 3 ? `
-3 SESSIES (minimaal maar effectief):
-- Zondag: Long run (build 60 → 180+ min)
-- Woensdag/Donderdag: Quality (tempo/MP/intervals)
-- Zaterdag OF Dinsdag: Easy run (45-60 min)
-` : ''}
-${sessionsPerWeek === 4 ? `
-4 SESSIES (optimaal voor meeste runners):
-- Zondag: Long run (build 75 → 195 min)
-- Zaterdag: Mid-long run (60-90 min easy)
-- Woensdag/Donderdag: Quality (tempo/MP/intervals)
-- Dinsdag: Easy run (40-50 min recovery)
-` : ''}
-${sessionsPerWeek === 5 ? `
-5 SESSIES (gevorderden):
-- Zondag: Long run (90 → 210 min)
-- Zaterdag: Mid-long (75-105 min)
-- Woensdag: Tempo/MP workout
-- Dinsdag: Easy run (45-60 min)
-- Donderdag/Vrijdag: Easy + strides OF recovery run
-` : ''}
-${sessionsPerWeek === 6 ? `
-6 SESSIES (competitieve runners):
-- Zondag: Long run (105 → 210+ min)
-- Zaterdag: Mid-long (75-120 min)
-- Woensdag: Primary quality (tempo/MP)
-- Dinsdag: Easy run (50-60 min)
-- Donderdag: Secondary quality (strides/intervals)
-- Vrijdag: Short easy (30-45 min)
-- Maandag: RUST (verplicht!)
-` : ''}
-
-BELANGRIJKE REGELS:
-1. GEEN rustdagen als workout tonen - gewoon weglaten uit schema
-2. Week 45, Zondag = "🏁 LOCH NESS MARATHON - 27 SEPTEMBER 2026"
-3. Back-to-back weekend (Za+Zo) is NORMAAL en effectief voor marathon prep
-4. Progressive long runs: start kort (60-75'), build naar 3+ uur
-5. Marathon pace: introduceer vanaf week 20, intensiveer vanaf week 30
-6. ${includeStrength ? 'Krachttraining op Ma+Wo of Ma+Do, NOOIT dag voor/na long run' : 'Geen kracht'}
-
-OUTPUT FORMAT (JSON):
+Geef JSON:
 {
   "phases": [
     {
-      "name": "Fase 1 - Basis Leggen",
+      "name": "Fase 1 - Basis",
       "weeks": [1,2,3,4],
-      "description": "Run-walk methode, blessurepreventie, gewenning",
+      "description": "...",
       "weeklyMinutes": "120-180'",
       "workouts": [
-        {"type": "Lange Duur", "description": "60' run-walk: 3' jog / 1' walk. Start Z2.", "day": "Zondag"},
-        {"type": "Easy Run", "description": "40' rustig joggen Z2. Conversatietempo.", "day": "Dinsdag"}
-        // GEEN rustdagen!
+        {"type": "Lange Duur", "description": "...", "day": "Zondag"},
+        {"type": "Easy Run", "description": "...", "day": "Dinsdag"},
+        {"type": "Rust", "description": "Rustdag", "day": "Woensdag"}
       ]
     }
   ],
-  "personalizedAdvice": "Voor ${userData.name}: [specifiek advies op basis van leeftijd/ervaring/doel]"
-}
-
-Genereer een professioneel, bewezen schema. Wees specifiek met tijden en intensiteiten!`;
+  "personalizedAdvice": "..."
+}`;
 
   const message = await anthropic.messages.create({
     model: 'claude-sonnet-4-20250514',
@@ -287,14 +193,26 @@ function buildWeeklyPlan(runWorkouts, strengthWorkouts, sessionsPerWeek, include
     console.log(`Added ${strengthAdded} strength workouts`);
   }
   
-  // Step 3: GEEN rustdagen toevoegen - laat vrije dagen gewoon leeg
-  // Rustdagen zijn impliciet: alle dagen zonder workout
+  // Step 3: Add rest days (only if we have room in the week)
+  const allDays = ['Zaterdag', 'Zondag', 'Maandag', 'Dinsdag', 'Woensdag', 'Donderdag', 'Vrijdag'];
+  const availableDays = allDays.filter(d => !usedDays.has(d));
+  
+  // Add 1-2 rest days from available days
+  const restDaysToAdd = Math.min(2, availableDays.length);
+  for (let i = 0; i < restDaysToAdd; i++) {
+    allWorkouts.push({
+      type: "Rust",
+      description: "Volledige rustdag - essentieel voor herstel",
+      day: availableDays[i]
+    });
+    usedDays.add(availableDays[i]);
+  }
   
   // Step 4: Sort by day order
   const dayOrder = ['Zaterdag', 'Zondag', 'Maandag', 'Dinsdag', 'Woensdag', 'Donderdag', 'Vrijdag'];
   allWorkouts.sort((a, b) => dayOrder.indexOf(a.day) - dayOrder.indexOf(b.day));
   
-  console.log(`Final workout count: ${allWorkouts.length} (rest days implicit)`);
+  console.log(`Final workout count: ${allWorkouts.length}`);
   console.log(`Days:`, allWorkouts.map(w => `${w.day}(${w.type})`).join(', '));
   
   return allWorkouts;

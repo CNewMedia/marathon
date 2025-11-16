@@ -2,7 +2,7 @@
 const CONFIG = {
   supabase: {
     url: 'https://uneazkpnasexwnyvsunr.supabase.co',
-    anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVuZWF6a3BuYXNleHdueXZzdW5yIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjMyMDc5NTAsImV4cCI6MjA3ODc4Mzk1MH0.EV-YFO5S3bAjuwsJmPqeEhbTnSR-1n1eG0kUAuU7TZo'
+    anonKey: 'sb_publishable_bVCrOS4KED-TDNFbAVKiOA_KQcEvx4r'
   },
   api: {
     generatePlan: '/.netlify/functions/generate-plan'

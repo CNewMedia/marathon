@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Loch Ness Marathon Trainer Pro - AI Powered</title>
+    <meta name="description" content="AI-powered marathon training platform with personalized 45-week training plans">
+    
+    <!-- Supabase -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    
+    <!-- Styles -->
+    <link rel="stylesheet" href="styles.css">
+</head>
+<script>
+// Debug auth flow
+window.addEventListener('load', () => {
+  const hash = window.location.hash;
+  if (hash && hash.includes('access_token')) {
+    console.log('Auth callback received!');
+  }
+});
+</script>
+<body>
+    <div id="app">
+        <!-- Content loaded by app.js -->
+        <div class="loading-container">
+            <div class="spinner"></div>
+            <p>Loading Marathon Trainer...</p>
+        </div>
+    </div>
+
+    <!-- Config -->
+    <script src="config.js"></script>
+    
+    <!-- Main Application -->
+    <script src="app.js"></script>
+</body>
+</html>

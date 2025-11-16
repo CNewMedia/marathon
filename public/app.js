@@ -361,11 +361,25 @@ function showOnboardingStep(step) {
     content = `
       <h2 class="question-title">Beschikbaarheid</h2>
       <div class="input-group">
-        <label class="input-label">Trainingen per week</label>
+        <label class="input-label">Hardloop trainingen per week</label>
         <div class="slider-container">
           <input type="range" class="slider" id="sessionsSlider" min="3" max="6" value="${userData.sessionsPerWeek}" oninput="document.getElementById('sessionsValue').textContent = this.value">
-          <div class="slider-value"><span id="sessionsValue">${userData.sessionsPerWeek}</span> trainingen/week</div>
+          <div class="slider-value"><span id="sessionsValue">${userData.sessionsPerWeek}</span> hardloop trainingen/week</div>
         </div>
+      </div>
+      <div class="input-group" style="margin-top: 25px;">
+        <label class="input-label">Wil je ook krachttraining toevoegen?</label>
+        <div class="option-grid">
+          <div class="option-card ${userData.strengthTraining === false ? 'selected' : ''}" onclick="selectOption('strengthTraining', false)">
+            <div class="option-icon">🏃‍♂️</div><div class="option-title">Alleen Hardlopen</div>
+          </div>
+          <div class="option-card ${userData.strengthTraining === true ? 'selected' : ''}" onclick="selectOption('strengthTraining', true)">
+            <div class="option-icon">💪</div><div class="option-title">+ Krachttraining</div>
+          </div>
+        </div>
+        <p style="color: var(--text-secondary); font-size: 0.85em; margin-top: 10px;">
+          Krachttraining helpt bij blessurepreventie en loopefficiëntie
+        </p>
       </div>
     `;
   } else if (step === 6) {

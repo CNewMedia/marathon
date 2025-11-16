@@ -1,4 +1,4 @@
-// Loch Ness Marathon Trainer - PRODUCTION VERSION
+// Loch Ness Marathon Trainer - COMPLETE WORKING VERSION
 const supabase = window.supabase.createClient(CONFIG.supabase.url, CONFIG.supabase.anonKey);
 
 let completedWorkouts = new Set();
@@ -10,14 +10,17 @@ let currentUser = null;
 let userData = {
   name: '', age: '', gender: '', weight: '', height: '',
   runningYears: '', experience: '', currentKmPerWeek: 0, longestRun: 0,
-  previousMarathons: 0, trainingHistory: '',
-  injuries: '', medications: '',
-  sessionsPerWeek: 4, timePerSession: 60,
-  goal: 'finish', targetTime: '',
-  strengthTraining: false, sleepHours: 7
+  previousMarathons: 0, previousMarathonTime: '',
+  injuries: '', medications: '', heartRateZonesKnown: false,
+  lastMedicalCheck: '', smokingStatus: 'never',
+  sessionsPerWeek: 4, timePerSession: 60, preferredTimes: [],
+  facilitiesAccess: [], runningEnvironment: 'mixed',
+  goal: 'finish', targetTime: '', raceDate: '2026-09-27', otherRaces: [],
+  crossTraining: [], strengthTraining: false, nutritionPlan: false, sleepHours: 7
 };
 
 document.addEventListener('DOMContentLoaded', async () => {
+  // Check if user is logged in
   const { data: { session } } = await supabase.auth.getSession();
   
   if (session) {
@@ -33,6 +36,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     showLoginScreen();
   }
 
+  // Listen for auth state changes
   supabase.auth.onAuthStateChange(async (event, session) => {
     if (event === 'SIGNED_IN' && session) {
       currentUser = session.user;
@@ -49,6 +53,43 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   });
 });
+
+function saveProgress() {
+  // Always save to localStorage as backup
+  localStorage.setItem('marathonProgress', JSON.stringify({
+    completedWorkouts: Array.from(completedWorkouts),
+    currentWeek: currentWeekNumber,
+    userData,
+    generatedPlan
+  }));
+  
+  // Also save to Supabase if logged in
+  if (currentUser && generatedPlan) {
+    supabase.from('training_plans')
+      .upsert({
+        user_id: currentUser.id,
+        plan_data: generatedPlan,
+        current_week: currentWeekNumber,
+        updated_at: new Date().toISOString()
+      }, {
+        onConflict: 'user_id'
+      })
+      .then(({ error }) => {
+        if (error) console.error('Error saving to Supabase:', error);
+      });
+  }
+}
+
+function loadProgress() {
+  const saved = localStorage.getItem('marathonProgress');
+  if (saved) {
+    const progress = JSON.parse(saved);
+    completedWorkouts = new Set(progress.completedWorkouts || []);
+    currentWeekNumber = progress.currentWeek || 1;
+    if (progress.userData) userData = progress.userData;
+    if (progress.generatedPlan) generatedPlan = progress.generatedPlan;
+  }
+}
 
 function showLoginScreen() {
   document.getElementById('app').innerHTML = `
@@ -109,9 +150,13 @@ async function handleLogout() {
 }
 
 async function loadUserData() {
-  if (!currentUser) return;
+  if (!currentUser) {
+    loadProgress();
+    return;
+  }
   
   try {
+    // Load user profile
     const { data: profile } = await supabase
       .from('user_profiles')
       .select('*')
@@ -126,6 +171,7 @@ async function loadUserData() {
       userData.height = profile.height || '';
       userData.experience = profile.experience || '';
     } else {
+      // Create new profile
       userData.name = currentUser.user_metadata?.full_name || currentUser.email.split('@')[0];
       
       await supabase.from('user_profiles').insert([{
@@ -136,6 +182,7 @@ async function loadUserData() {
       }]);
     }
     
+    // Load training plan
     const { data: plans } = await supabase
       .from('training_plans')
       .select('*')
@@ -148,6 +195,7 @@ async function loadUserData() {
       currentWeekNumber = plans[0].current_week || 1;
     }
     
+    // Load workout progress
     const { data: progress } = await supabase
       .from('workout_progress')
       .select('week_number, workout_day')
@@ -159,68 +207,37 @@ async function loadUserData() {
     }
   } catch (error) {
     console.error('Error loading user data:', error);
+    loadProgress(); // Fallback to localStorage
   }
 }
 
-async function saveProgress() {
-  if (!currentUser) {
-    localStorage.setItem('marathonProgress', JSON.stringify({
-      completedWorkouts: Array.from(completedWorkouts),
-      currentWeek: currentWeekNumber,
-      userData,
-      generatedPlan
-    }));
-    return;
+function getPhaseForWeek(weekNum) {
+  if (!generatedPlan || !generatedPlan.phases) return null;
+  for (let phase of generatedPlan.phases) {
+    if (phase.weeks.includes(weekNum)) return phase;
   }
-  
-  try {
-    if (generatedPlan) {
-      const { data: existingPlans } = await supabase
-        .from('training_plans')
-        .select('id')
-        .eq('user_id', currentUser.id)
-        .order('created_at', { ascending: false })
-        .limit(1);
-      
-      if (existingPlans && existingPlans.length > 0) {
-        await supabase.from('training_plans').update({
-          plan_data: generatedPlan,
-          current_week: currentWeekNumber,
-          updated_at: new Date().toISOString()
-        }).eq('id', existingPlans[0].id);
-      } else {
-        await supabase.from('training_plans').insert([{
-          user_id: currentUser.id,
-          plan_data: generatedPlan,
-          current_week: currentWeekNumber
-        }]);
-      }
-    }
-  } catch (error) {
-    console.error('Error saving progress:', error);
-  }
+  return generatedPlan.phases[0];
 }
 
 function showWelcome() {
   document.getElementById('app').innerHTML = `
     <div class="welcome-screen">
       <div class="welcome-card">
-        <div class="user-menu">
-          <span class="user-menu-name">👋 ${userData.name}</span>
-          <button class="btn-logout" onclick="handleLogout()">Uitloggen</button>
-        </div>
-        
+        ${currentUser ? `
+          <div class="user-menu">
+            <span class="user-menu-name">👋 ${userData.name}</span>
+            <button class="btn-logout" onclick="handleLogout()">Uitloggen</button>
+          </div>
+        ` : ''}
         <div class="logo">🏃‍♂️</div>
         <h1>Loch Ness Marathon Trainer</h1>
         <p class="subtitle">AI-Powered Persoonlijk Trainingsschema</p>
-        
         <div class="input-group">
           <label class="input-label">Hoe mogen we je noemen?</label>
           <input type="text" id="userName" class="input-field" placeholder="Vul je naam in" value="${userData.name || ''}">
         </div>
-        
         <button class="btn" onclick="startOnboarding()">🚀 Start Jouw Training</button>
-        ${generatedPlan ? '<button class="btn btn-secondary" onclick="showDashboard()">📊 Ga naar Dashboard</button>' : ''}
+        ${userData.name && generatedPlan ? '<button class="btn btn-secondary" onclick="showDashboard()">📊 Ga naar Dashboard</button>' : ''}
       </div>
     </div>
   `;
@@ -235,9 +252,9 @@ function startOnboarding() {
   showOnboardingStep(1);
 }
 
-function showOnboarding Step(step) {
+function showOnboardingStep(step) {
   currentStep = step;
-  const steps = ['Persoonlijk', 'Sportief', 'Historiek', 'Gezondheid', 'Beschikbaarheid', 'Doelen', 'Overzicht'];
+  const steps = ['Persoonlijk', 'Sportief', 'Gezondheid', 'Beschikbaarheid', 'Doelen', 'Extra', 'Overzicht'];
   let content = '';
   
   if (step === 1) {
@@ -334,18 +351,6 @@ function showOnboarding Step(step) {
     `;
   } else if (step === 3) {
     content = `
-      <h2 class="question-title">Trainingshistoriek</h2>
-      <p class="question-subtitle">Dit helpt ons je opbouw beter af te stemmen</p>
-      <div class="input-group">
-        <label class="input-label">Beschrijf je training van de laatste 6 maanden</label>
-        <textarea id="trainingHistory" class="input-field" placeholder="bijv. 3x per week 5km gelopen, 1x krachttraining, gestopt tijdens zomervakantie..." style="min-height: 120px; font-family: inherit;">${userData.trainingHistory}</textarea>
-        <small style="color: var(--text-secondary); display: block; margin-top: 8px;">
-          Vertel over frequentie, afstanden, rustperiodes, blessures, etc.
-        </small>
-      </div>
-    `;
-  } else if (step === 4) {
-    content = `
       <h2 class="question-title">Gezondheid</h2>
       <p class="question-subtitle">Voor een veilig trainingsplan</p>
       <div class="alert alert-warning">
@@ -357,26 +362,23 @@ function showOnboarding Step(step) {
         <textarea id="injuries" class="input-field" placeholder="bijv. knie, achillespees..." style="min-height: 80px; font-family: inherit;">${userData.injuries}</textarea>
       </div>
       <div class="input-group">
-        <label class="input-label">Medicatie (indien relevant)</label>
-        <textarea id="medications" class="input-field" placeholder="indien van toepassing..." style="min-height: 60px; font-family: inherit;">${userData.medications}</textarea>
+        <label class="input-label">Medicatie</label>
+        <textarea id="medications" class="input-field" placeholder="indien relevant..." style="min-height: 60px; font-family: inherit;">${userData.medications}</textarea>
       </div>
     `;
-  } else if (step === 5) {
+  } else if (step === 4) {
     content = `
       <h2 class="question-title">Beschikbaarheid</h2>
       <p class="question-subtitle">Afgestemd op jouw leven</p>
       <div class="input-group">
-        <label class="input-label">Hoeveel trainingen per week?</label>
-        <small style="color: var(--text-secondary); display: block; margin-bottom: 12px;">
-          (inclusief kracht/cross-training, minimum 3 loopsessies)
-        </small>
+        <label class="input-label">Trainingen per week</label>
         <div class="slider-container">
           <input type="range" class="slider" id="sessionsSlider" min="3" max="6" value="${userData.sessionsPerWeek}" oninput="document.getElementById('sessionsValue').textContent = this.value">
           <div class="slider-value"><span id="sessionsValue">${userData.sessionsPerWeek}</span> trainingen/week</div>
         </div>
       </div>
       <div class="input-group">
-        <label class="input-label">Gemiddelde tijd per training</label>
+        <label class="input-label">Tijd per training</label>
         <div class="option-grid">
           <div class="option-card ${userData.timePerSession === 30 ? 'selected' : ''}" onclick="selectOption('timePerSession', 30)">
             <div class="option-title">30-45 min</div>
@@ -389,8 +391,40 @@ function showOnboarding Step(step) {
           </div>
         </div>
       </div>
+    `;
+  } else if (step === 5) {
+    content = `
+      <h2 class="question-title">Jouw Doel</h2>
+      <p class="question-subtitle">27 september 2026</p>
       <div class="input-group">
-        <label class="input-label">Ervaring met krachttraining?</label>
+        <label class="input-label">Hoofddoel</label>
+        <div class="option-grid">
+          <div class="option-card ${userData.goal === 'finish' ? 'selected' : ''}" onclick="selectOption('goal', 'finish')">
+            <div class="option-icon">🎯</div>
+            <div class="option-title">Finishen</div>
+          </div>
+          <div class="option-card ${userData.goal === 'time' ? 'selected' : ''}" onclick="selectOption('goal', 'time')">
+            <div class="option-icon">⏱️</div>
+            <div class="option-title">Tijd Doel</div>
+          </div>
+        </div>
+      </div>
+      <div id="targetTimeGroup" style="display: ${userData.goal === 'time' ? 'block' : 'none'};">
+        <div class="input-group">
+          <label class="input-label">Doel Tijd</label>
+          <div style="display: flex; gap: 10px; align-items: center;">
+            <input type="number" id="targetHours" class="input-field" placeholder="uren" min="2" max="7" value="${userData.targetTime.split(':')[0] || ''}" style="width: 100px;">
+            <span style="font-size: 1.5em;">:</span>
+            <input type="number" id="targetMinutes" class="input-field" placeholder="min" min="0" max="59" value="${userData.targetTime.split(':')[1] || ''}" style="width: 100px;">
+          </div>
+        </div>
+      </div>
+    `;
+  } else if (step === 6) {
+    content = `
+      <h2 class="question-title">Extra</h2>
+      <div class="input-group">
+        <label class="input-label">Krachttraining</label>
         <div class="option-grid">
           <div class="option-card ${userData.strengthTraining ? 'selected' : ''}" onclick="selectOption('strengthTraining', true)">
             <div class="option-icon">💪</div>
@@ -402,35 +436,9 @@ function showOnboarding Step(step) {
           </div>
         </div>
       </div>
-    `;
-  } else if (step === 6) {
-    content = `
-      <h2 class="question-title">Jouw Doel</h2>
-      <p class="question-subtitle">27 september 2026</p>
       <div class="input-group">
-        <label class="input-label">Hoofddoel</label>
-        <div class="option-grid">
-          <div class="option-card ${userData.goal === 'finish' ? 'selected' : ''}" onclick="selectOption('goal', 'finish')">
-            <div class="option-icon">🎯</div>
-            <div class="option-title">Finishen</div>
-            <div class="option-desc">Gezond de finish halen</div>
-          </div>
-          <div class="option-card ${userData.goal === 'time' ? 'selected' : ''}" onclick="selectOption('goal', 'time')">
-            <div class="option-icon">⏱️</div>
-            <div class="option-title">Tijd Doel</div>
-            <div class="option-desc">Specifieke finish tijd</div>
-          </div>
-        </div>
-      </div>
-      <div id="targetTimeGroup" style="display: ${userData.goal === 'time' ? 'block' : 'none'};">
-        <div class="input-group">
-          <label class="input-label">Doel Finish Tijd</label>
-          <div style="display: flex; gap: 10px; align-items: center;">
-            <input type="number" id="targetHours" class="input-field" placeholder="uren" min="2" max="7" value="${userData.targetTime.split(':')[0] || ''}" style="width: 100px;">
-            <span style="font-size: 1.5em;">:</span>
-            <input type="number" id="targetMinutes" class="input-field" placeholder="min" min="0" max="59" value="${userData.targetTime.split(':')[1] || ''}" style="width: 100px;">
-          </div>
-        </div>
+        <label class="input-label">Slaap (uur/nacht)</label>
+        <input type="number" id="sleepHours" class="input-field" placeholder="7" min="4" max="12" step="0.5" value="${userData.sleepHours}">
       </div>
     `;
   } else if (step === 7) {
@@ -466,7 +474,7 @@ function showOnboarding Step(step) {
       </div>
       <div class="alert alert-info">
         <span style="font-size: 1.8em;">🤖</span>
-        <div><strong>AI Ready!</strong> We gaan nu je schema genereren op basis van al deze informatie.</div>
+        <div><strong>AI Ready!</strong> We gaan nu je gepersonaliseerde schema genereren.</div>
       </div>
     `;
   }
@@ -522,18 +530,18 @@ function goToStep(step) {
     userData.currentKmPerWeek = document.getElementById('currentKm')?.value || 0;
     userData.longestRun = document.getElementById('longestRun')?.value || 0;
   } else if (currentStep === 3) {
-    userData.trainingHistory = document.getElementById('trainingHistory')?.value || '';
-  } else if (currentStep === 4) {
     userData.injuries = document.getElementById('injuries')?.value || '';
     userData.medications = document.getElementById('medications')?.value || '';
-  } else if (currentStep === 5) {
+  } else if (currentStep === 4) {
     userData.sessionsPerWeek = document.getElementById('sessionsSlider')?.value || 4;
-  } else if (currentStep === 6) {
+  } else if (currentStep === 5) {
     const hours = document.getElementById('targetHours')?.value;
     const minutes = document.getElementById('targetMinutes')?.value;
     if (hours && minutes) {
       userData.targetTime = `${hours}:${minutes}`;
     }
+  } else if (currentStep === 6) {
+    userData.sleepHours = document.getElementById('sleepHours')?.value || 7;
   }
   showOnboardingStep(step);
 }
@@ -544,33 +552,26 @@ async function generateAIPlan() {
       <div style="background: rgba(255, 255, 255, 0.1); backdrop-filter: blur(10px); border-radius: 20px; padding: 40px; max-width: 600px; text-align: center; border: 1px solid rgba(255, 255, 255, 0.2);">
         <div style="width: 80px; height: 80px; border: 6px solid rgba(255, 255, 255, 0.1); border-top-color: #4ecca3; border-radius: 50%; animation: spin 1s linear infinite; margin: 0 auto 30px;"></div>
         <div style="font-size: 1.5em; color: #4ecca3; margin-bottom: 10px;">🤖 AI genereert jouw schema...</div>
-        <div style="color: #aaa;">Op basis van je BMI, historiek en doelen</div>
       </div>
     </div>
     <style>@keyframes spin { to { transform: rotate(360deg); } }</style>
   `;
   
   try {
+    const requestBody = JSON.stringify({ userData: userData });
+    console.log('Request:', requestBody);
+    
     const response = await fetch('/.netlify/functions/generate-plan', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userData: userData })
+      body: requestBody
     });
     
-    const data = await response.json();
+    const responseText = await response.text();
+    console.log('Response:', responseText);
+    
+    const data = JSON.parse(responseText);
     generatedPlan = data.plan;
-    
-    if (currentUser) {
-      await supabase.from('user_profiles').update({
-        name: userData.name,
-        age: userData.age,
-        gender: userData.gender,
-        weight: userData.weight,
-        height: userData.height,
-        experience: userData.experience
-      }).eq('id', currentUser.id);
-    }
-    
     saveProgress();
     showDashboard();
     
@@ -585,29 +586,267 @@ async function generateAIPlan() {
 function createDemoPlan() {
   return {
     phases: [
-      { name: "Fase 1 - Terug in beweging", weeks: [1, 2, 3, 4], description: "Opbouw", weeklyMinutes: "150-180'", workouts: [
-        { type: "Run-Walk", description: "10×(1' jog / 2' wandel)", day: "Maandag" },
-        { type: "Kracht", description: "30' heup/bil/core", day: "Dinsdag" },
-        { type: "Easy", description: "35' rustig", day: "Woensdag" },
+      { name: "Fase 1", weeks: [1, 2, 3, 4], description: "Opbouw", weeklyMinutes: "150'", workouts: [
+        { type: "Easy", description: "30'", day: "Maandag" },
+        { type: "Rust", description: "", day: "Dinsdag" },
+        { type: "Easy", description: "35'", day: "Woensdag" },
         { type: "Rust", description: "", day: "Donderdag" },
-        { type: "Run-Walk", description: "8×(2' jog / 2' wandel)", day: "Vrijdag" },
-        { type: "Kracht", description: "30' stabiliteit", day: "Zaterdag" },
-        { type: "Long", description: "50' Z2", day: "Zondag" }
-      ]},
-      { name: "Fase 2 - Basis opbouwen", weeks: [5, 6, 7, 8], description: "Volume", weeklyMinutes: "200'", workouts: [
-        { type: "Easy", description: "45' Z2", day: "Maandag" },
-        { type: "Kracht", description: "35' full body", day: "Dinsdag" },
-        { type: "Tempo", description: "40' inc tempo", day: "Woensdag" },
-        { type: "Rust", description: "", day: "Donderdag" },
-        { type: "Easy", description: "40' Z2", day: "Vrijdag" },
-        { type: "Strides", description: "45' + strides", day: "Zaterdag" },
-        { type: "Long", description: "75' Z2", day: "Zondag" }
+        { type: "Easy", description: "30'", day: "Vrijdag" },
+        { type: "Rust", description: "", day: "Zaterdag" },
+        { type: "Long", description: "50'", day: "Zondag" }
       ]}
     ]
   };
 }
 
-// Continue with showDashboard and other functions...
-// (Keeping response within limits - the rest of the code continues the same pattern)
+function showDashboard() {
+  const plan = generatedPlan || createDemoPlan();
+  const totalWorkouts = 45 * 6;
+  const completedCount = completedWorkouts.size;
+  const progressPercent = Math.min((completedCount / totalWorkouts) * 100, 100);
+  
+  document.getElementById('app').innerHTML = `
+    <div class="container">
+      <div class="header">
+        ${currentUser ? `
+          <div class="user-menu">
+            <span class="user-menu-name">👋 ${userData.name}</span>
+            <button class="btn-logout" onclick="handleLogout()">Uitloggen</button>
+          </div>
+        ` : ''}
+        <h1>🏃‍♂️ Loch Ness Marathon Trainer Pro</h1>
+        <p class="subtitle">Je AI-gegenereerde 45-weken trainingsschema</p>
+        <div class="race-info">
+          <div class="info-item">
+            <span class="info-icon">📅</span>
+            <div>
+              <div style="font-weight: 600;">Racedag</div>
+              <div style="font-size: 0.9em; color: var(--text-secondary);">27 september 2026</div>
+            </div>
+          </div>
+          <div class="info-item">
+            <span class="info-icon">📍</span>
+            <div>
+              <div style="font-weight: 600;">Locatie</div>
+              <div style="font-size: 0.9em; color: var(--text-secondary);">Loch Ness, Schotland</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      <div class="dashboard">
+        <div class="card">
+          <div class="card-header">
+            <h3 class="card-title">Jouw Voortgang</h3>
+            <span class="card-icon">📊</span>
+          </div>
+          <div class="progress-ring">
+            <svg width="150" height="150">
+              <circle class="progress-ring-circle" cx="75" cy="75" r="65"></circle>
+              <circle class="progress-ring-progress" cx="75" cy="75" r="65" style="stroke-dasharray: ${2 * Math.PI * 65}; stroke-dashoffset: ${2 * Math.PI * 65 * (1 - progressPercent / 100)};"></circle>
+            </svg>
+            <div class="progress-text">
+              <div class="progress-value">${Math.round(progressPercent)}%</div>
+              <div class="progress-label">Voltooid</div>
+            </div>
+          </div>
+        </div>
+        
+        <div class="card">
+          <div class="card-header">
+            <h3 class="card-title">Statistieken</h3>
+            <span class="card-icon">📈</span>
+          </div>
+          <div class="stat-grid">
+            <div class="stat-item">
+              <div class="stat-value">${currentWeekNumber}</div>
+              <div class="stat-label">Huidige Week</div>
+            </div>
+            <div class="stat-item">
+              <div class="stat-value">${45 - currentWeekNumber + 1}</div>
+              <div class="stat-label">Weken Te Gaan</div>
+            </div>
+            <div class="stat-item">
+              <div class="stat-value">${completedCount}</div>
+              <div class="stat-label">Trainingen</div>
+            </div>
+            <div class="stat-item">
+              <div class="stat-value">${userData.goal === 'finish' ? 'Finishen' : userData.targetTime}</div>
+              <div class="stat-label">Doel</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      <div class="alert alert-info" style="margin-bottom: 20px;">
+        <span style="font-size: 1.5em;">🤖</span>
+        <div>
+          <strong>AI Gepersonaliseerd</strong><br>
+          Dit schema is speciaal voor jou gemaakt op basis van je leeftijd (${userData.age}), ervaring (${userData.experience}), en doel (${userData.goal === 'finish' ? 'finishen' : userData.targetTime}).
+        </div>
+      </div>
+      
+      <div class="phase-selector">
+        ${plan.phases.map((phase, idx) => `<button class="phase-btn ${idx === 0 ? 'active' : ''}" onclick="filterByPhase(${idx})">${phase.name}</button>`).join('')}
+      </div>
+      
+      <div class="week-calendar" id="weekCalendar">
+        ${renderWeekCalendar()}
+      </div>
+      
+      <div class="tips-section">
+        <h3 class="tips-title">💡 Persoonlijke Tips</h3>
+        <div class="tip-item"><strong>Voor jou:</strong> ${getPersonalizedTip()}</div>
+      </div>
+    </div>
+    
+    <div class="modal" id="weekModal">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2 class="modal-title" id="modalTitle">Week Details</h2>
+          <button class="close-btn" onclick="closeModal()">&times;</button>
+        </div>
+        <div id="modalBody"></div>
+      </div>
+    </div>
+  `;
+}
 
-console.log('Marathon Trainer Pro loaded! 🎉');
+function renderWeekCalendar(weeks) {
+  const plan = generatedPlan || createDemoPlan();
+  const weeksToShow = weeks || Array.from({length: 45}, (_, i) => i + 1);
+  
+  return weeksToShow.map(weekNum => {
+    const phase = getPhaseForWeek(weekNum);
+    if (!phase) return '';
+    
+    const isCurrent = weekNum === currentWeekNumber;
+    const weekWorkouts = phase.workouts.filter(w => w.type !== 'Rust');
+    const completedCount = weekWorkouts.filter(w => completedWorkouts.has(weekNum + '-' + w.day)).length;
+    const progressPercent = (completedCount / weekWorkouts.length) * 100;
+    
+    return `
+      <div class="week-card ${isCurrent ? 'current' : ''}" onclick="openWeekModal(${weekNum})">
+        <div class="week-number">Week ${weekNum}</div>
+        <div class="week-phase">${phase.name}</div>
+        <div class="week-summary">${phase.weeklyMinutes}</div>
+        <div class="week-summary">${completedCount}/${weekWorkouts.length} trainingen</div>
+        <div class="week-progress">
+          <div class="week-progress-bar" style="width: ${progressPercent}%"></div>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+function filterByPhase(phaseIdx) {
+  const plan = generatedPlan || createDemoPlan();
+  document.querySelectorAll('.phase-btn').forEach((btn, idx) => btn.classList.toggle('active', idx === phaseIdx));
+  document.getElementById('weekCalendar').innerHTML = renderWeekCalendar(plan.phases[phaseIdx].weeks);
+}
+
+function openWeekModal(weekNum) {
+  const phase = getPhaseForWeek(weekNum);
+  if (!phase) return;
+  
+  document.getElementById('modalTitle').textContent = 'Week ' + weekNum + ' - ' + phase.name;
+  document.getElementById('modalBody').innerHTML = `
+    <div class="alert alert-info">
+      <span>ℹ️</span>
+      <div><strong>Doel:</strong> ${phase.description}<br><strong>Totale tijd:</strong> ${phase.weeklyMinutes}</div>
+    </div>
+    <h3 style="margin: 20px 0 15px; color: var(--success);">Trainingen</h3>
+    <ul class="workout-list">
+      ${phase.workouts.map(workout => {
+        const workoutId = weekNum + '-' + workout.day;
+        const isCompleted = completedWorkouts.has(workoutId);
+        return `
+          <li class="workout-item ${isCompleted ? 'completed' : ''}" onclick="toggleWorkout('${workoutId}', event)">
+            <div class="workout-checkbox"></div>
+            <div style="flex: 1;">
+              <div style="display: flex; gap: 10px; margin-bottom: 5px;">
+                <span class="workout-type">${workout.type}</span>
+                <strong>${workout.day}</strong>
+              </div>
+              <div style="color: var(--text-secondary);">${workout.description}</div>
+            </div>
+          </li>
+        `;
+      }).join('')}
+    </ul>
+    <div style="margin-top: 30px; display: flex; gap: 10px;">
+      <button class="btn" onclick="markWeekComplete(${weekNum})">Week Voltooien</button>
+      <button class="btn btn-secondary" onclick="closeModal()">Sluiten</button>
+    </div>
+  `;
+  document.getElementById('weekModal').classList.add('active');
+}
+
+function closeModal() {
+  document.getElementById('weekModal').classList.remove('active');
+}
+
+async function toggleWorkout(workoutId, event) {
+  event.stopPropagation();
+  const [weekNum, day] = workoutId.split('-');
+  
+  if (completedWorkouts.has(workoutId)) {
+    completedWorkouts.delete(workoutId);
+    
+    // Delete from Supabase if logged in
+    if (currentUser) {
+      await supabase.from('workout_progress').delete()
+        .eq('user_id', currentUser.id)
+        .eq('week_number', parseInt(weekNum))
+        .eq('workout_day', day);
+    }
+  } else {
+    completedWorkouts.add(workoutId);
+    
+    // Save to Supabase if logged in
+    if (currentUser) {
+      const phase = getPhaseForWeek(parseInt(weekNum));
+      const workout = phase?.workouts.find(w => w.day === day);
+      
+      await supabase.from('workout_progress').insert([{
+        user_id: currentUser.id,
+        week_number: parseInt(weekNum),
+        workout_day: day,
+        workout_type: workout?.type || '',
+        completed: true,
+        completed_at: new Date().toISOString()
+      }]);
+    }
+  }
+  
+  saveProgress();
+  showDashboard();
+  setTimeout(() => openWeekModal(parseInt(weekNum)), 100);
+}
+
+function markWeekComplete(weekNum) {
+  const phase = getPhaseForWeek(weekNum);
+  phase.workouts.forEach(w => completedWorkouts.add(weekNum + '-' + w.day));
+  if (weekNum === currentWeekNumber) currentWeekNumber++;
+  saveProgress();
+  closeModal();
+  showDashboard();
+}
+
+function getPersonalizedTip() {
+  if (userData.age > 50) {
+    return "Extra focus op herstel en mobiliteit - neem rust serieus!";
+  } else if (userData.experience === 'beginner') {
+    return "Begin rustig en bouw geleidelijk op - consistentie is belangrijker dan snelheid!";
+  } else if (userData.injuries) {
+    return "Let extra op blessure preventie - warm goed op en cool down!";
+  } else {
+    return "Luister naar je lichaam en geniet van het proces!";
+  }
+}
+
+document.addEventListener('click', e => {
+  if (e.target === document.getElementById('weekModal')) closeModal();
+});
+
+console.log('Complete AI Marathon Trainer loaded! 🎉');

@@ -1,226 +1,76 @@
-// Loch Ness Marathon Trainer - PRODUCTION VERSION
+// Loch Ness Marathon Trainer - IMPROVED VERSION
 const supabase = window.supabase.createClient(CONFIG.supabase.url, CONFIG.supabase.anonKey);
 
 let completedWorkouts = new Set();
 let currentWeekNumber = 1;
 let currentStep = 1;
 let generatedPlan = null;
-let currentUser = null;
 
 let userData = {
   name: '', age: '', gender: '', weight: '', height: '',
   runningYears: '', experience: '', currentKmPerWeek: 0, longestRun: 0,
-  previousMarathons: 0, trainingHistory: '',
+  previousMarathons: 0, previousMarathonTime: '',
+  trainingHistory: '', // NIEUW
   injuries: '', medications: '',
   sessionsPerWeek: 4, timePerSession: 60,
   goal: 'finish', targetTime: '',
   strengthTraining: false, sleepHours: 7
 };
 
-document.addEventListener('DOMContentLoaded', async () => {
-  const { data: { session } } = await supabase.auth.getSession();
-  
-  if (session) {
-    currentUser = session.user;
-    await loadUserData();
-    
-    if (generatedPlan) {
-      showDashboard();
-    } else {
-      showWelcome();
-    }
-  } else {
-    showLoginScreen();
-  }
-
-  supabase.auth.onAuthStateChange(async (event, session) => {
-    if (event === 'SIGNED_IN' && session) {
-      currentUser = session.user;
-      await loadUserData();
-      
-      if (generatedPlan) {
-        showDashboard();
-      } else {
-        showWelcome();
-      }
-    } else if (event === 'SIGNED_OUT') {
-      currentUser = null;
-      showLoginScreen();
-    }
-  });
+document.addEventListener('DOMContentLoaded', () => {
+  loadProgress();
+  showWelcome();
 });
 
-function showLoginScreen() {
-  document.getElementById('app').innerHTML = `
-    <div class="welcome-screen">
-      <div class="welcome-card" style="max-width: 450px;">
-        <div class="logo">🏃‍♂️</div>
-        <h1>Loch Ness Marathon Trainer</h1>
-        <p class="subtitle">AI-Powered Persoonlijk Trainingsschema</p>
-        
-        <div style="margin: 40px 0;">
-          <p style="text-align: center; color: var(--text-secondary); margin-bottom: 30px;">
-            Log in om je trainingsschema te starten en je progressie bij te houden op al je devices.
-          </p>
-          
-          <button class="btn-google" onclick="signInWithGoogle()">
-            <svg width="18" height="18" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" style="margin-right: 12px;">
-              <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
-              <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
-              <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>
-              <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
-            </svg>
-            Inloggen met Google
-          </button>
-        </div>
-        
-        <div style="text-align: center; margin-top: 30px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.1);">
-          <p style="font-size: 0.85em; color: var(--text-secondary);">
-            Door in te loggen ga je akkoord met onze voorwaarden
-          </p>
-        </div>
-      </div>
-    </div>
-  `;
+function saveProgress() {
+  localStorage.setItem('marathonProgress', JSON.stringify({
+    completedWorkouts: Array.from(completedWorkouts),
+    currentWeek: currentWeekNumber,
+    userData,
+    generatedPlan
+  }));
 }
 
-async function signInWithGoogle() {
-  try {
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: {
-        redirectTo: window.location.origin
-      }
-    });
-    if (error) throw error;
-  } catch (error) {
-    console.error('Error signing in:', error);
-    alert('Er ging iets mis met inloggen. Probeer het opnieuw.');
+function loadProgress() {
+  const saved = localStorage.getItem('marathonProgress');
+  if (saved) {
+    const progress = JSON.parse(saved);
+    completedWorkouts = new Set(progress.completedWorkouts || []);
+    currentWeekNumber = progress.currentWeek || 1;
+    if (progress.userData) userData = progress.userData;
+    if (progress.generatedPlan) generatedPlan = progress.generatedPlan;
   }
 }
 
-async function handleLogout() {
-  if (!confirm('Wil je uitloggen?')) return;
-  try {
-    await supabase.auth.signOut();
-  } catch (error) {
-    console.error('Error signing out:', error);
+function getPhaseForWeek(weekNum) {
+  if (!generatedPlan || !generatedPlan.phases) return null;
+  for (let phase of generatedPlan.phases) {
+    if (phase.weeks.includes(weekNum)) return phase;
   }
+  return generatedPlan.phases[0];
 }
 
-async function loadUserData() {
-  if (!currentUser) return;
-  
-  try {
-    const { data: profile } = await supabase
-      .from('user_profiles')
-      .select('*')
-      .eq('id', currentUser.id)
-      .single();
-    
-    if (profile) {
-      userData.name = profile.name || currentUser.user_metadata?.full_name || currentUser.email.split('@')[0];
-      userData.age = profile.age || '';
-      userData.gender = profile.gender || '';
-      userData.weight = profile.weight || '';
-      userData.height = profile.height || '';
-      userData.experience = profile.experience || '';
-    } else {
-      userData.name = currentUser.user_metadata?.full_name || currentUser.email.split('@')[0];
-      
-      await supabase.from('user_profiles').insert([{
-        id: currentUser.id,
-        email: currentUser.email,
-        name: userData.name,
-        created_at: new Date().toISOString()
-      }]);
-    }
-    
-    const { data: plans } = await supabase
-      .from('training_plans')
-      .select('*')
-      .eq('user_id', currentUser.id)
-      .order('created_at', { ascending: false })
-      .limit(1);
-    
-    if (plans && plans.length > 0) {
-      generatedPlan = plans[0].plan_data;
-      currentWeekNumber = plans[0].current_week || 1;
-    }
-    
-    const { data: progress } = await supabase
-      .from('workout_progress')
-      .select('week_number, workout_day')
-      .eq('user_id', currentUser.id)
-      .eq('completed', true);
-    
-    if (progress) {
-      completedWorkouts = new Set(progress.map(p => `${p.week_number}-${p.workout_day}`));
-    }
-  } catch (error) {
-    console.error('Error loading user data:', error);
+function getCurrentPhaseIndex() {
+  if (!generatedPlan || !generatedPlan.phases) return 0;
+  for (let i = 0; i < generatedPlan.phases.length; i++) {
+    if (generatedPlan.phases[i].weeks.includes(currentWeekNumber)) return i;
   }
-}
-
-async function saveProgress() {
-  if (!currentUser) {
-    localStorage.setItem('marathonProgress', JSON.stringify({
-      completedWorkouts: Array.from(completedWorkouts),
-      currentWeek: currentWeekNumber,
-      userData,
-      generatedPlan
-    }));
-    return;
-  }
-  
-  try {
-    if (generatedPlan) {
-      const { data: existingPlans } = await supabase
-        .from('training_plans')
-        .select('id')
-        .eq('user_id', currentUser.id)
-        .order('created_at', { ascending: false })
-        .limit(1);
-      
-      if (existingPlans && existingPlans.length > 0) {
-        await supabase.from('training_plans').update({
-          plan_data: generatedPlan,
-          current_week: currentWeekNumber,
-          updated_at: new Date().toISOString()
-        }).eq('id', existingPlans[0].id);
-      } else {
-        await supabase.from('training_plans').insert([{
-          user_id: currentUser.id,
-          plan_data: generatedPlan,
-          current_week: currentWeekNumber
-        }]);
-      }
-    }
-  } catch (error) {
-    console.error('Error saving progress:', error);
-  }
+  return 0;
 }
 
 function showWelcome() {
   document.getElementById('app').innerHTML = `
     <div class="welcome-screen">
       <div class="welcome-card">
-        <div class="user-menu">
-          <span class="user-menu-name">👋 ${userData.name}</span>
-          <button class="btn-logout" onclick="handleLogout()">Uitloggen</button>
-        </div>
-        
         <div class="logo">🏃‍♂️</div>
         <h1>Loch Ness Marathon Trainer</h1>
         <p class="subtitle">AI-Powered Persoonlijk Trainingsschema</p>
-        
         <div class="input-group">
           <label class="input-label">Hoe mogen we je noemen?</label>
           <input type="text" id="userName" class="input-field" placeholder="Vul je naam in" value="${userData.name || ''}">
         </div>
-        
         <button class="btn" onclick="startOnboarding()">🚀 Start Jouw Training</button>
-        ${generatedPlan ? '<button class="btn btn-secondary" onclick="showDashboard()">📊 Ga naar Dashboard</button>' : ''}
+        ${userData.name && generatedPlan ? '<button class="btn btn-secondary" onclick="showDashboard()">📊 Ga naar Dashboard</button>' : ''}
       </div>
     </div>
   `;
@@ -235,7 +85,7 @@ function startOnboarding() {
   showOnboardingStep(1);
 }
 
-function showOnboarding Step(step) {
+function showOnboardingStep(step) {
   currentStep = step;
   const steps = ['Persoonlijk', 'Sportief', 'Historiek', 'Gezondheid', 'Beschikbaarheid', 'Doelen', 'Overzicht'];
   let content = '';
@@ -557,20 +407,9 @@ async function generateAIPlan() {
       body: JSON.stringify({ userData: userData })
     });
     
-    const data = await response.json();
+    const responseText = await response.text();
+    const data = JSON.parse(responseText);
     generatedPlan = data.plan;
-    
-    if (currentUser) {
-      await supabase.from('user_profiles').update({
-        name: userData.name,
-        age: userData.age,
-        gender: userData.gender,
-        weight: userData.weight,
-        height: userData.height,
-        experience: userData.experience
-      }).eq('id', currentUser.id);
-    }
-    
     saveProgress();
     showDashboard();
     
@@ -586,28 +425,292 @@ function createDemoPlan() {
   return {
     phases: [
       { name: "Fase 1 - Terug in beweging", weeks: [1, 2, 3, 4], description: "Opbouw", weeklyMinutes: "150-180'", workouts: [
-        { type: "Run-Walk", description: "10×(1' jog / 2' wandel)", day: "Maandag" },
-        { type: "Kracht", description: "30' heup/bil/core", day: "Dinsdag" },
-        { type: "Easy", description: "35' rustig", day: "Woensdag" },
+        { type: "Easy", description: "30'", day: "Maandag" },
+        { type: "Kracht", description: "30'", day: "Dinsdag" },
+        { type: "Easy", description: "35'", day: "Woensdag" },
         { type: "Rust", description: "", day: "Donderdag" },
-        { type: "Run-Walk", description: "8×(2' jog / 2' wandel)", day: "Vrijdag" },
-        { type: "Kracht", description: "30' stabiliteit", day: "Zaterdag" },
-        { type: "Long", description: "50' Z2", day: "Zondag" }
+        { type: "Easy", description: "30'", day: "Vrijdag" },
+        { type: "Rust", description: "", day: "Zaterdag" },
+        { type: "Long", description: "50'", day: "Zondag" }
       ]},
       { name: "Fase 2 - Basis opbouwen", weeks: [5, 6, 7, 8], description: "Volume", weeklyMinutes: "200'", workouts: [
-        { type: "Easy", description: "45' Z2", day: "Maandag" },
-        { type: "Kracht", description: "35' full body", day: "Dinsdag" },
-        { type: "Tempo", description: "40' inc tempo", day: "Woensdag" },
+        { type: "Easy", description: "45'", day: "Maandag" },
+        { type: "Kracht", description: "35'", day: "Dinsdag" },
+        { type: "Tempo", description: "40'", day: "Woensdag" },
         { type: "Rust", description: "", day: "Donderdag" },
-        { type: "Easy", description: "40' Z2", day: "Vrijdag" },
-        { type: "Strides", description: "45' + strides", day: "Zaterdag" },
-        { type: "Long", description: "75' Z2", day: "Zondag" }
+        { type: "Easy", description: "40'", day: "Vrijdag" },
+        { type: "Rust", description: "", day: "Zaterdag" },
+        { type: "Long", description: "75'", day: "Zondag" }
       ]}
     ]
   };
 }
 
-// Continue with showDashboard and other functions...
-// (Keeping response within limits - the rest of the code continues the same pattern)
+function showDashboard() {
+  const plan = generatedPlan || createDemoPlan();
+  const totalWorkouts = 45 * 6;
+  const completedCount = completedWorkouts.size;
+  const progressPercent = Math.min((completedCount / totalWorkouts) * 100, 100);
+  const currentPhase = getPhaseForWeek(currentWeekNumber);
+  const currentPhaseIndex = getCurrentPhaseIndex();
+  
+  const currentWeekWorkouts = currentPhase ? currentPhase.workouts.filter(w => w.type !== 'Rust') : [];
+  const currentWeekCompleted = currentWeekWorkouts.filter(w => completedWorkouts.has(currentWeekNumber + '-' + w.day)).length;
+  
+  document.getElementById('app').innerHTML = `
+    <div class="container">
+      <div class="header">
+        <h1>🏃‍♂️ Loch Ness Marathon Trainer Pro</h1>
+        <p class="subtitle">Je persoonlijke 45-weken trainingsschema</p>
+        <div class="race-info">
+          <div class="info-item">
+            <span class="info-icon">📅</span>
+            <div>
+              <div style="font-weight: 600;">Racedag</div>
+              <div style="font-size: 0.9em; color: var(--text-secondary);">27 september 2026</div>
+            </div>
+          </div>
+          <div class="info-item">
+            <span class="info-icon">📍</span>
+            <div>
+              <div style="font-weight: 600;">Locatie</div>
+              <div style="font-size: 0.9em; color: var(--text-secondary);">Loch Ness, Schotland</div>
+            </div>
+          </div>
+          <div class="info-item">
+            <span class="info-icon">🎯</span>
+            <div>
+              <div style="font-weight: 600;">Afstand</div>
+              <div style="font-size: 0.9em; color: var(--text-secondary);">42.195 km</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      <div class="dashboard-grid">
+        <div class="card">
+          <div class="card-header">
+            <h3 class="card-title">Totale Voortgang</h3>
+            <span class="card-icon">📊</span>
+          </div>
+          <div class="progress-ring">
+            <svg width="150" height="150">
+              <circle class="progress-ring-circle" cx="75" cy="75" r="65"></circle>
+              <circle class="progress-ring-progress" cx="75" cy="75" r="65" style="stroke-dasharray: ${2 * Math.PI * 65}; stroke-dashoffset: ${2 * Math.PI * 65 * (1 - progressPercent / 100)};"></circle>
+            </svg>
+            <div class="progress-text">
+              <div class="progress-value">${Math.round(progressPercent)}%</div>
+              <div class="progress-label">Voltooid</div>
+            </div>
+          </div>
+        </div>
+        
+        <div class="card">
+          <div class="card-header">
+            <h3 class="card-title">Week Statistieken</h3>
+            <span class="card-icon">📈</span>
+          </div>
+          <div class="stat-grid">
+            <div class="stat-item">
+              <div class="stat-value">${currentWeekNumber}</div>
+              <div class="stat-label">Huidige Week</div>
+            </div>
+            <div class="stat-item">
+              <div class="stat-value">${45 - currentWeekNumber + 1}</div>
+              <div class="stat-label">Weken Te Gaan</div>
+            </div>
+            <div class="stat-item">
+              <div class="stat-value">${completedCount}</div>
+              <div class="stat-label">Trainingen Voltooid</div>
+            </div>
+            <div class="stat-item">
+              <div class="stat-value">${currentPhase ? currentPhase.name.split('-')[0].trim() : 'Fase 1'}</div>
+              <div class="stat-label">Huidige Fase</div>
+            </div>
+          </div>
+        </div>
+        
+        <div class="card current-week-card">
+          <div class="card-header">
+            <h3 class="card-title">Deze Week</h3>
+            <span class="card-icon">🎯</span>
+          </div>
+          <div style="text-align: center; margin: 20px 0;">
+            <div style="font-size: 2.5em; color: var(--success); font-weight: 700; margin-bottom: 5px;">
+              ${currentWeekCompleted}/${currentWeekWorkouts.length}
+            </div>
+            <div style="color: var(--text-secondary); margin-bottom: 15px;">Trainingen</div>
+            <div style="color: var(--text-secondary); font-size: 0.9em; margin-bottom: 15px;">
+              ${currentPhase ? currentPhase.weeklyMinutes : ''} totaal gepland
+            </div>
+          </div>
+          <button class="btn" onclick="openWeekModal(${currentWeekNumber})" style="width: 100%;">
+            Bekijk Week ${currentWeekNumber}
+          </button>
+        </div>
+      </div>
+      
+      <div class="phase-selector">
+        ${plan.phases.map((phase, idx) => `<button class="phase-btn ${idx === currentPhaseIndex ? 'active' : ''}" onclick="filterByPhase(${idx})">${phase.name}</button>`).join('')}
+      </div>
+      
+      <div class="week-calendar" id="weekCalendar">
+        ${renderWeekCalendar(plan.phases[currentPhaseIndex].weeks)}
+      </div>
+      
+      <div class="tips-section">
+        <h3 class="tips-title">💡 Persoonlijke Tips</h3>
+        <div class="tip-item"><strong>Voor jou:</strong> ${getPersonalizedTip()}</div>
+      </div>
+    </div>
+    
+    <div class="modal" id="weekModal">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2 class="modal-title" id="modalTitle">Week Details</h2>
+          <button class="close-btn" onclick="closeModal()">&times;</button>
+        </div>
+        <div id="modalBody"></div>
+      </div>
+    </div>
+  `;
+}
 
-console.log('Marathon Trainer Pro loaded! 🎉');
+function renderWeekCalendar(weeks) {
+  const plan = generatedPlan || createDemoPlan();
+  const weeksToShow = weeks || Array.from({length: 45}, (_, i) => i + 1);
+  
+  return weeksToShow.map(weekNum => {
+    const phase = getPhaseForWeek(weekNum);
+    if (!phase) return '';
+    
+    const isCurrent = weekNum === currentWeekNumber;
+    const weekWorkouts = phase.workouts.filter(w => w.type !== 'Rust');
+    const completedCount = weekWorkouts.filter(w => completedWorkouts.has(weekNum + '-' + w.day)).length;
+    const progressPercent = weekWorkouts.length > 0 ? (completedCount / weekWorkouts.length) * 100 : 0;
+    
+    return `
+      <div class="week-card ${isCurrent ? 'current' : ''}" onclick="openWeekModal(${weekNum})">
+        <div class="week-number">Week ${weekNum}</div>
+        <div class="week-phase">${phase.name}</div>
+        <div class="week-summary">${phase.weeklyMinutes}</div>
+        <div class="week-summary">${completedCount}/${weekWorkouts.length} trainingen</div>
+        <div class="week-progress">
+          <div class="week-progress-bar" style="width: ${progressPercent}%"></div>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+function filterByPhase(phaseIdx) {
+  const plan = generatedPlan || createDemoPlan();
+  document.querySelectorAll('.phase-btn').forEach((btn, idx) => btn.classList.toggle('active', idx === phaseIdx));
+  document.getElementById('weekCalendar').innerHTML = renderWeekCalendar(plan.phases[phaseIdx].weeks);
+}
+
+function openWeekModal(weekNum) {
+  const phase = getPhaseForWeek(weekNum);
+  if (!phase) return;
+  
+  document.getElementById('modalTitle').textContent = 'Week ' + weekNum + ' - ' + phase.name;
+  document.getElementById('modalBody').innerHTML = `
+    <div class="alert alert-info">
+      <span>ℹ️</span>
+      <div><strong>Doel:</strong> ${phase.description}<br><strong>Totale tijd:</strong> ${phase.weeklyMinutes}</div>
+    </div>
+    <h3 style="margin: 20px 0 15px; color: var(--success);">Trainingen</h3>
+    <ul class="workout-list">
+      ${phase.workouts.map(workout => {
+        const workoutId = weekNum + '-' + workout.day;
+        const isCompleted = completedWorkouts.has(workoutId);
+        return `
+          <li class="workout-item ${isCompleted ? 'completed' : ''}" onclick="toggleWorkout('${workoutId}', event)">
+            <div class="workout-checkbox"></div>
+            <div style="flex: 1;">
+              <div style="display: flex; gap: 10px; margin-bottom: 5px;">
+                <span class="workout-type">${workout.type}</span>
+                <strong>${workout.day}</strong>
+              </div>
+              <div style="color: var(--text-secondary);">${workout.description}</div>
+            </div>
+          </li>
+        `;
+      }).join('')}
+    </ul>
+    <div style="margin-top: 30px; display: flex; gap: 10px;">
+      <button class="btn" onclick="markWeekComplete(${weekNum})">Week Voltooien</button>
+      <button class="btn btn-secondary" onclick="closeModal()">Sluiten</button>
+    </div>
+  `;
+  document.getElementById('weekModal').classList.add('active');
+}
+
+function closeModal() {
+  document.getElementById('weekModal').classList.remove('active');
+}
+
+function toggleWorkout(workoutId, event) {
+  event.stopPropagation();
+  if (completedWorkouts.has(workoutId)) completedWorkouts.delete(workoutId);
+  else completedWorkouts.add(workoutId);
+  saveProgress();
+  const weekNum = parseInt(workoutId.split('-')[0]);
+  showDashboard();
+  setTimeout(() => openWeekModal(weekNum), 100);
+}
+
+function markWeekComplete(weekNum) {
+  const phase = getPhaseForWeek(weekNum);
+  phase.workouts.forEach(w => completedWorkouts.add(weekNum + '-' + w.day));
+  if (weekNum === currentWeekNumber) currentWeekNumber++;
+  saveProgress();
+  closeModal();
+  showDashboard();
+}
+
+function getPersonalizedTip() {
+  const bmi = userData.weight && userData.height ? (userData.weight / Math.pow(userData.height / 100, 2)) : 0;
+  
+  if (bmi > 30) {
+    return "Met je BMI is extra aandacht voor gewichtsbeheersing en gewrichtsbescherming belangrijk - bouw rustig op!";
+  } else if (userData.age > 50) {
+    return "Extra focus op herstel en mobiliteit - neem rust serieus!";
+  } else if (userData.experience === 'beginner') {
+    return "Begin rustig en bouw geleidelijk op - consistentie is belangrijker dan snelheid!";
+  } else if (userData.injuries) {
+    return "Let extra op blessure preventie - warm goed op en cool down!";
+  } else if (userData.trainingHistory && userData.trainingHistory.includes('gestopt')) {
+    return "Na een rustperiode is extra voorzichtig opbouwen belangrijk - neem de tijd!";
+  } else {
+    return "Luister naar je lichaam en geniet van het proces!";
+  }
+}
+
+document.addEventListener('click', e => {
+  if (e.target === document.getElementById('weekModal')) closeModal();
+});
+
+console.log('Improved Marathon Trainer loaded! 🎉');
+
+// Add custom CSS for 3-column dashboard
+const style = document.createElement('style');
+style.textContent = `
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 20px;
+  margin-bottom: 30px;
+}
+
+@media (max-width: 1024px) {
+  .dashboard-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.current-week-card {
+  background: linear-gradient(135deg, rgba(233, 69, 96, 0.1), rgba(78, 204, 163, 0.1));
+}
+`;
+document.head.appendChild(style);

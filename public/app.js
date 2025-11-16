@@ -1,4 +1,4 @@
-// Loch Ness Marathon Trainer - COMPLETE WORKING VERSION
+// Loch Ness Marathon Trainer - IMPROVED VERSION
 const supabase = window.supabase.createClient(CONFIG.supabase.url, CONFIG.supabase.anonKey);
 
 let completedWorkouts = new Set();
@@ -10,12 +10,11 @@ let userData = {
   name: '', age: '', gender: '', weight: '', height: '',
   runningYears: '', experience: '', currentKmPerWeek: 0, longestRun: 0,
   previousMarathons: 0, previousMarathonTime: '',
-  injuries: '', medications: '', heartRateZonesKnown: false,
-  lastMedicalCheck: '', smokingStatus: 'never',
-  sessionsPerWeek: 4, timePerSession: 60, preferredTimes: [],
-  facilitiesAccess: [], runningEnvironment: 'mixed',
-  goal: 'finish', targetTime: '', raceDate: '2026-09-27', otherRaces: [],
-  crossTraining: [], strengthTraining: false, nutritionPlan: false, sleepHours: 7
+  trainingHistory: '', // NIEUW
+  injuries: '', medications: '',
+  sessionsPerWeek: 4, timePerSession: 60,
+  goal: 'finish', targetTime: '',
+  strengthTraining: false, sleepHours: 7
 };
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -51,6 +50,14 @@ function getPhaseForWeek(weekNum) {
   return generatedPlan.phases[0];
 }
 
+function getCurrentPhaseIndex() {
+  if (!generatedPlan || !generatedPlan.phases) return 0;
+  for (let i = 0; i < generatedPlan.phases.length; i++) {
+    if (generatedPlan.phases[i].weeks.includes(currentWeekNumber)) return i;
+  }
+  return 0;
+}
+
 function showWelcome() {
   document.getElementById('app').innerHTML = `
     <div class="welcome-screen">
@@ -80,7 +87,7 @@ function startOnboarding() {
 
 function showOnboardingStep(step) {
   currentStep = step;
-  const steps = ['Persoonlijk', 'Sportief', 'Gezondheid', 'Beschikbaarheid', 'Doelen', 'Extra', 'Overzicht'];
+  const steps = ['Persoonlijk', 'Sportief', 'Historiek', 'Gezondheid', 'Beschikbaarheid', 'Doelen', 'Overzicht'];
   let content = '';
   
   if (step === 1) {
@@ -177,6 +184,18 @@ function showOnboardingStep(step) {
     `;
   } else if (step === 3) {
     content = `
+      <h2 class="question-title">Trainingshistoriek</h2>
+      <p class="question-subtitle">Dit helpt ons je opbouw beter af te stemmen</p>
+      <div class="input-group">
+        <label class="input-label">Beschrijf je training van de laatste 6 maanden</label>
+        <textarea id="trainingHistory" class="input-field" placeholder="bijv. 3x per week 5km gelopen, 1x krachttraining, gestopt tijdens zomervakantie..." style="min-height: 120px; font-family: inherit;">${userData.trainingHistory}</textarea>
+        <small style="color: var(--text-secondary); display: block; margin-top: 8px;">
+          Vertel over frequentie, afstanden, rustperiodes, blessures, etc.
+        </small>
+      </div>
+    `;
+  } else if (step === 4) {
+    content = `
       <h2 class="question-title">Gezondheid</h2>
       <p class="question-subtitle">Voor een veilig trainingsplan</p>
       <div class="alert alert-warning">
@@ -188,23 +207,26 @@ function showOnboardingStep(step) {
         <textarea id="injuries" class="input-field" placeholder="bijv. knie, achillespees..." style="min-height: 80px; font-family: inherit;">${userData.injuries}</textarea>
       </div>
       <div class="input-group">
-        <label class="input-label">Medicatie</label>
-        <textarea id="medications" class="input-field" placeholder="indien relevant..." style="min-height: 60px; font-family: inherit;">${userData.medications}</textarea>
+        <label class="input-label">Medicatie (indien relevant)</label>
+        <textarea id="medications" class="input-field" placeholder="indien van toepassing..." style="min-height: 60px; font-family: inherit;">${userData.medications}</textarea>
       </div>
     `;
-  } else if (step === 4) {
+  } else if (step === 5) {
     content = `
       <h2 class="question-title">Beschikbaarheid</h2>
       <p class="question-subtitle">Afgestemd op jouw leven</p>
       <div class="input-group">
-        <label class="input-label">Trainingen per week</label>
+        <label class="input-label">Hoeveel trainingen per week?</label>
+        <small style="color: var(--text-secondary); display: block; margin-bottom: 12px;">
+          (inclusief kracht/cross-training, minimum 3 loopsessies)
+        </small>
         <div class="slider-container">
           <input type="range" class="slider" id="sessionsSlider" min="3" max="6" value="${userData.sessionsPerWeek}" oninput="document.getElementById('sessionsValue').textContent = this.value">
           <div class="slider-value"><span id="sessionsValue">${userData.sessionsPerWeek}</span> trainingen/week</div>
         </div>
       </div>
       <div class="input-group">
-        <label class="input-label">Tijd per training</label>
+        <label class="input-label">Gemiddelde tijd per training</label>
         <div class="option-grid">
           <div class="option-card ${userData.timePerSession === 30 ? 'selected' : ''}" onclick="selectOption('timePerSession', 30)">
             <div class="option-title">30-45 min</div>
@@ -217,40 +239,8 @@ function showOnboardingStep(step) {
           </div>
         </div>
       </div>
-    `;
-  } else if (step === 5) {
-    content = `
-      <h2 class="question-title">Jouw Doel</h2>
-      <p class="question-subtitle">27 september 2026</p>
       <div class="input-group">
-        <label class="input-label">Hoofddoel</label>
-        <div class="option-grid">
-          <div class="option-card ${userData.goal === 'finish' ? 'selected' : ''}" onclick="selectOption('goal', 'finish')">
-            <div class="option-icon">🎯</div>
-            <div class="option-title">Finishen</div>
-          </div>
-          <div class="option-card ${userData.goal === 'time' ? 'selected' : ''}" onclick="selectOption('goal', 'time')">
-            <div class="option-icon">⏱️</div>
-            <div class="option-title">Tijd Doel</div>
-          </div>
-        </div>
-      </div>
-      <div id="targetTimeGroup" style="display: ${userData.goal === 'time' ? 'block' : 'none'};">
-        <div class="input-group">
-          <label class="input-label">Doel Tijd</label>
-          <div style="display: flex; gap: 10px; align-items: center;">
-            <input type="number" id="targetHours" class="input-field" placeholder="uren" min="2" max="7" value="${userData.targetTime.split(':')[0] || ''}" style="width: 100px;">
-            <span style="font-size: 1.5em;">:</span>
-            <input type="number" id="targetMinutes" class="input-field" placeholder="min" min="0" max="59" value="${userData.targetTime.split(':')[1] || ''}" style="width: 100px;">
-          </div>
-        </div>
-      </div>
-    `;
-  } else if (step === 6) {
-    content = `
-      <h2 class="question-title">Extra</h2>
-      <div class="input-group">
-        <label class="input-label">Krachttraining</label>
+        <label class="input-label">Ervaring met krachttraining?</label>
         <div class="option-grid">
           <div class="option-card ${userData.strengthTraining ? 'selected' : ''}" onclick="selectOption('strengthTraining', true)">
             <div class="option-icon">💪</div>
@@ -262,9 +252,35 @@ function showOnboardingStep(step) {
           </div>
         </div>
       </div>
+    `;
+  } else if (step === 6) {
+    content = `
+      <h2 class="question-title">Jouw Doel</h2>
+      <p class="question-subtitle">27 september 2026</p>
       <div class="input-group">
-        <label class="input-label">Slaap (uur/nacht)</label>
-        <input type="number" id="sleepHours" class="input-field" placeholder="7" min="4" max="12" step="0.5" value="${userData.sleepHours}">
+        <label class="input-label">Hoofddoel</label>
+        <div class="option-grid">
+          <div class="option-card ${userData.goal === 'finish' ? 'selected' : ''}" onclick="selectOption('goal', 'finish')">
+            <div class="option-icon">🎯</div>
+            <div class="option-title">Finishen</div>
+            <div class="option-desc">Gezond de finish halen</div>
+          </div>
+          <div class="option-card ${userData.goal === 'time' ? 'selected' : ''}" onclick="selectOption('goal', 'time')">
+            <div class="option-icon">⏱️</div>
+            <div class="option-title">Tijd Doel</div>
+            <div class="option-desc">Specifieke finish tijd</div>
+          </div>
+        </div>
+      </div>
+      <div id="targetTimeGroup" style="display: ${userData.goal === 'time' ? 'block' : 'none'};">
+        <div class="input-group">
+          <label class="input-label">Doel Finish Tijd</label>
+          <div style="display: flex; gap: 10px; align-items: center;">
+            <input type="number" id="targetHours" class="input-field" placeholder="uren" min="2" max="7" value="${userData.targetTime.split(':')[0] || ''}" style="width: 100px;">
+            <span style="font-size: 1.5em;">:</span>
+            <input type="number" id="targetMinutes" class="input-field" placeholder="min" min="0" max="59" value="${userData.targetTime.split(':')[1] || ''}" style="width: 100px;">
+          </div>
+        </div>
       </div>
     `;
   } else if (step === 7) {
@@ -300,7 +316,7 @@ function showOnboardingStep(step) {
       </div>
       <div class="alert alert-info">
         <span style="font-size: 1.8em;">🤖</span>
-        <div><strong>AI Ready!</strong> We gaan nu je gepersonaliseerde schema genereren.</div>
+        <div><strong>AI Ready!</strong> We gaan nu je schema genereren op basis van al deze informatie.</div>
       </div>
     `;
   }
@@ -356,18 +372,18 @@ function goToStep(step) {
     userData.currentKmPerWeek = document.getElementById('currentKm')?.value || 0;
     userData.longestRun = document.getElementById('longestRun')?.value || 0;
   } else if (currentStep === 3) {
+    userData.trainingHistory = document.getElementById('trainingHistory')?.value || '';
+  } else if (currentStep === 4) {
     userData.injuries = document.getElementById('injuries')?.value || '';
     userData.medications = document.getElementById('medications')?.value || '';
-  } else if (currentStep === 4) {
-    userData.sessionsPerWeek = document.getElementById('sessionsSlider')?.value || 4;
   } else if (currentStep === 5) {
+    userData.sessionsPerWeek = document.getElementById('sessionsSlider')?.value || 4;
+  } else if (currentStep === 6) {
     const hours = document.getElementById('targetHours')?.value;
     const minutes = document.getElementById('targetMinutes')?.value;
     if (hours && minutes) {
       userData.targetTime = `${hours}:${minutes}`;
     }
-  } else if (currentStep === 6) {
-    userData.sleepHours = document.getElementById('sleepHours')?.value || 7;
   }
   showOnboardingStep(step);
 }
@@ -378,24 +394,20 @@ async function generateAIPlan() {
       <div style="background: rgba(255, 255, 255, 0.1); backdrop-filter: blur(10px); border-radius: 20px; padding: 40px; max-width: 600px; text-align: center; border: 1px solid rgba(255, 255, 255, 0.2);">
         <div style="width: 80px; height: 80px; border: 6px solid rgba(255, 255, 255, 0.1); border-top-color: #4ecca3; border-radius: 50%; animation: spin 1s linear infinite; margin: 0 auto 30px;"></div>
         <div style="font-size: 1.5em; color: #4ecca3; margin-bottom: 10px;">🤖 AI genereert jouw schema...</div>
+        <div style="color: #aaa;">Op basis van je BMI, historiek en doelen</div>
       </div>
     </div>
     <style>@keyframes spin { to { transform: rotate(360deg); } }</style>
   `;
   
   try {
-    const requestBody = JSON.stringify({ userData: userData });
-    console.log('Request:', requestBody);
-    
     const response = await fetch('/.netlify/functions/generate-plan', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: requestBody
+      body: JSON.stringify({ userData: userData })
     });
     
     const responseText = await response.text();
-    console.log('Response:', responseText);
-    
     const data = JSON.parse(responseText);
     generatedPlan = data.plan;
     saveProgress();
@@ -412,14 +424,23 @@ async function generateAIPlan() {
 function createDemoPlan() {
   return {
     phases: [
-      { name: "Fase 1", weeks: [1, 2, 3, 4], description: "Opbouw", weeklyMinutes: "150'", workouts: [
+      { name: "Fase 1 - Terug in beweging", weeks: [1, 2, 3, 4], description: "Opbouw", weeklyMinutes: "150-180'", workouts: [
         { type: "Easy", description: "30'", day: "Maandag" },
-        { type: "Rust", description: "", day: "Dinsdag" },
+        { type: "Kracht", description: "30'", day: "Dinsdag" },
         { type: "Easy", description: "35'", day: "Woensdag" },
         { type: "Rust", description: "", day: "Donderdag" },
         { type: "Easy", description: "30'", day: "Vrijdag" },
         { type: "Rust", description: "", day: "Zaterdag" },
         { type: "Long", description: "50'", day: "Zondag" }
+      ]},
+      { name: "Fase 2 - Basis opbouwen", weeks: [5, 6, 7, 8], description: "Volume", weeklyMinutes: "200'", workouts: [
+        { type: "Easy", description: "45'", day: "Maandag" },
+        { type: "Kracht", description: "35'", day: "Dinsdag" },
+        { type: "Tempo", description: "40'", day: "Woensdag" },
+        { type: "Rust", description: "", day: "Donderdag" },
+        { type: "Easy", description: "40'", day: "Vrijdag" },
+        { type: "Rust", description: "", day: "Zaterdag" },
+        { type: "Long", description: "75'", day: "Zondag" }
       ]}
     ]
   };
@@ -430,12 +451,17 @@ function showDashboard() {
   const totalWorkouts = 45 * 6;
   const completedCount = completedWorkouts.size;
   const progressPercent = Math.min((completedCount / totalWorkouts) * 100, 100);
+  const currentPhase = getPhaseForWeek(currentWeekNumber);
+  const currentPhaseIndex = getCurrentPhaseIndex();
+  
+  const currentWeekWorkouts = currentPhase ? currentPhase.workouts.filter(w => w.type !== 'Rust') : [];
+  const currentWeekCompleted = currentWeekWorkouts.filter(w => completedWorkouts.has(currentWeekNumber + '-' + w.day)).length;
   
   document.getElementById('app').innerHTML = `
     <div class="container">
       <div class="header">
         <h1>🏃‍♂️ Loch Ness Marathon Trainer Pro</h1>
-        <p class="subtitle">Je AI-gegenereerde 45-weken trainingsschema</p>
+        <p class="subtitle">Je persoonlijke 45-weken trainingsschema</p>
         <div class="race-info">
           <div class="info-item">
             <span class="info-icon">📅</span>
@@ -451,13 +477,20 @@ function showDashboard() {
               <div style="font-size: 0.9em; color: var(--text-secondary);">Loch Ness, Schotland</div>
             </div>
           </div>
+          <div class="info-item">
+            <span class="info-icon">🎯</span>
+            <div>
+              <div style="font-weight: 600;">Afstand</div>
+              <div style="font-size: 0.9em; color: var(--text-secondary);">42.195 km</div>
+            </div>
+          </div>
         </div>
       </div>
       
-      <div class="dashboard">
+      <div class="dashboard-grid">
         <div class="card">
           <div class="card-header">
-            <h3 class="card-title">Jouw Voortgang</h3>
+            <h3 class="card-title">Totale Voortgang</h3>
             <span class="card-icon">📊</span>
           </div>
           <div class="progress-ring">
@@ -474,7 +507,7 @@ function showDashboard() {
         
         <div class="card">
           <div class="card-header">
-            <h3 class="card-title">Statistieken</h3>
+            <h3 class="card-title">Week Statistieken</h3>
             <span class="card-icon">📈</span>
           </div>
           <div class="stat-grid">
@@ -488,30 +521,41 @@ function showDashboard() {
             </div>
             <div class="stat-item">
               <div class="stat-value">${completedCount}</div>
-              <div class="stat-label">Trainingen</div>
+              <div class="stat-label">Trainingen Voltooid</div>
             </div>
             <div class="stat-item">
-              <div class="stat-value">${userData.goal === 'finish' ? 'Finishen' : userData.targetTime}</div>
-              <div class="stat-label">Doel</div>
+              <div class="stat-value">${currentPhase ? currentPhase.name.split('-')[0].trim() : 'Fase 1'}</div>
+              <div class="stat-label">Huidige Fase</div>
             </div>
           </div>
         </div>
-      </div>
-      
-      <div class="alert alert-info" style="margin-bottom: 20px;">
-        <span style="font-size: 1.5em;">🤖</span>
-        <div>
-          <strong>AI Gepersonaliseerd</strong><br>
-          Dit schema is speciaal voor jou gemaakt op basis van je leeftijd (${userData.age}), ervaring (${userData.experience}), en doel (${userData.goal === 'finish' ? 'finishen' : userData.targetTime}).
+        
+        <div class="card current-week-card">
+          <div class="card-header">
+            <h3 class="card-title">Deze Week</h3>
+            <span class="card-icon">🎯</span>
+          </div>
+          <div style="text-align: center; margin: 20px 0;">
+            <div style="font-size: 2.5em; color: var(--success); font-weight: 700; margin-bottom: 5px;">
+              ${currentWeekCompleted}/${currentWeekWorkouts.length}
+            </div>
+            <div style="color: var(--text-secondary); margin-bottom: 15px;">Trainingen</div>
+            <div style="color: var(--text-secondary); font-size: 0.9em; margin-bottom: 15px;">
+              ${currentPhase ? currentPhase.weeklyMinutes : ''} totaal gepland
+            </div>
+          </div>
+          <button class="btn" onclick="openWeekModal(${currentWeekNumber})" style="width: 100%;">
+            Bekijk Week ${currentWeekNumber}
+          </button>
         </div>
       </div>
       
       <div class="phase-selector">
-        ${plan.phases.map((phase, idx) => `<button class="phase-btn ${idx === 0 ? 'active' : ''}" onclick="filterByPhase(${idx})">${phase.name}</button>`).join('')}
+        ${plan.phases.map((phase, idx) => `<button class="phase-btn ${idx === currentPhaseIndex ? 'active' : ''}" onclick="filterByPhase(${idx})">${phase.name}</button>`).join('')}
       </div>
       
       <div class="week-calendar" id="weekCalendar">
-        ${renderWeekCalendar()}
+        ${renderWeekCalendar(plan.phases[currentPhaseIndex].weeks)}
       </div>
       
       <div class="tips-section">
@@ -543,7 +587,7 @@ function renderWeekCalendar(weeks) {
     const isCurrent = weekNum === currentWeekNumber;
     const weekWorkouts = phase.workouts.filter(w => w.type !== 'Rust');
     const completedCount = weekWorkouts.filter(w => completedWorkouts.has(weekNum + '-' + w.day)).length;
-    const progressPercent = (completedCount / weekWorkouts.length) * 100;
+    const progressPercent = weekWorkouts.length > 0 ? (completedCount / weekWorkouts.length) * 100 : 0;
     
     return `
       <div class="week-card ${isCurrent ? 'current' : ''}" onclick="openWeekModal(${weekNum})">
@@ -626,12 +670,18 @@ function markWeekComplete(weekNum) {
 }
 
 function getPersonalizedTip() {
-  if (userData.age > 50) {
+  const bmi = userData.weight && userData.height ? (userData.weight / Math.pow(userData.height / 100, 2)) : 0;
+  
+  if (bmi > 30) {
+    return "Met je BMI is extra aandacht voor gewichtsbeheersing en gewrichtsbescherming belangrijk - bouw rustig op!";
+  } else if (userData.age > 50) {
     return "Extra focus op herstel en mobiliteit - neem rust serieus!";
   } else if (userData.experience === 'beginner') {
     return "Begin rustig en bouw geleidelijk op - consistentie is belangrijker dan snelheid!";
   } else if (userData.injuries) {
     return "Let extra op blessure preventie - warm goed op en cool down!";
+  } else if (userData.trainingHistory && userData.trainingHistory.includes('gestopt')) {
+    return "Na een rustperiode is extra voorzichtig opbouwen belangrijk - neem de tijd!";
   } else {
     return "Luister naar je lichaam en geniet van het proces!";
   }
@@ -641,4 +691,26 @@ document.addEventListener('click', e => {
   if (e.target === document.getElementById('weekModal')) closeModal();
 });
 
-console.log('Complete AI Marathon Trainer loaded! 🎉');
+console.log('Improved Marathon Trainer loaded! 🎉');
+
+// Add custom CSS for 3-column dashboard
+const style = document.createElement('style');
+style.textContent = `
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 20px;
+  margin-bottom: 30px;
+}
+
+@media (max-width: 1024px) {
+  .dashboard-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.current-week-card {
+  background: linear-gradient(135deg, rgba(233, 69, 96, 0.1), rgba(78, 204, 163, 0.1));
+}
+`;
+document.head.appendChild(style);

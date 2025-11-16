@@ -724,6 +724,16 @@ function showDashboard() {
         <h3 class="tips-title">💡 Tip voor jou</h3>
         <div class="tip-item">${getPersonalizedTip()}</div>
       </div>
+      
+      <!-- Reset Plan Button -->
+      <div style="margin-top: 30px; text-align: center;">
+        <button class="btn-reset" onclick="confirmResetPlan()">
+          🔄 Nieuw Schema Genereren
+        </button>
+        <p style="color: var(--text-secondary); font-size: 0.85em; margin-top: 10px;">
+          Start opnieuw met een vers trainingsschema
+        </p>
+      </div>
     </div>
   `;
 }
@@ -812,6 +822,118 @@ function getPersonalizedTip() {
   if (userData.experience === 'beginner') return "Begin rustig en bouw geleidelijk op - consistentie is belangrijker dan snelheid";
   if (userData.injuries) return "Let extra op blessure preventie - warm goed op en cool down";
   return "Luister naar je lichaam en geniet van het proces!";
+}
+
+// ===== RESET PLAN FUNCTIONALITY =====
+
+function confirmResetPlan() {
+  // Show confirmation modal
+  const modal = document.createElement('div');
+  modal.className = 'modal-overlay';
+  modal.innerHTML = `
+    <div class="modal-content">
+      <h2 style="margin-bottom: 20px; color: var(--text);">⚠️ Plan Resetten?</h2>
+      <p style="color: var(--text-secondary); margin-bottom: 25px; line-height: 1.6;">
+        Weet je zeker dat je een <strong>nieuw trainingsschema</strong> wilt genereren?
+      </p>
+      <div class="alert alert-warning" style="margin-bottom: 25px;">
+        <span>🚨</span>
+        <div>
+          <strong>Let op!</strong> Dit verwijdert:
+          <ul style="margin: 10px 0 0 20px; line-height: 1.8;">
+            <li>Je huidige trainingsschema</li>
+            <li>Alle afgevinkte trainingen</li>
+            <li>Je voortgang</li>
+          </ul>
+        </div>
+      </div>
+      <div style="display: flex; gap: 15px; justify-content: center;">
+        <button class="btn btn-secondary" onclick="closeResetModal()">
+          ← Annuleren
+        </button>
+        <button class="btn" style="background: var(--warning);" onclick="resetPlan()">
+          🔄 Ja, Reset Plan
+        </button>
+      </div>
+    </div>
+  `;
+  
+  document.body.appendChild(modal);
+  
+  // Fade in animation
+  setTimeout(() => modal.classList.add('active'), 10);
+}
+
+function closeResetModal() {
+  const modal = document.querySelector('.modal-overlay');
+  if (modal) {
+    modal.classList.remove('active');
+    setTimeout(() => modal.remove(), 300);
+  }
+}
+
+async function resetPlan() {
+  closeResetModal();
+  
+  // Show loading screen
+  document.getElementById('app').innerHTML = `
+    <div style="min-height: 100vh; display: flex; align-items: center; justify-content: center; background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%); color: #eee; padding: 20px;">
+      <div style="background: rgba(255, 255, 255, 0.1); backdrop-filter: blur(10px); border-radius: 20px; padding: 40px; max-width: 600px; text-align: center; border: 1px solid rgba(255, 255, 255, 0.2);">
+        <div style="width: 80px; height: 80px; border: 6px solid rgba(255, 255, 255, 0.1); border-top-color: #ff6348; border-radius: 50%; animation: spin 1s linear infinite; margin: 0 auto 30px;"></div>
+        <div style="font-size: 1.5em; color: #ff6348; margin-bottom: 10px;">🔄 Plan wordt gereset...</div>
+        <div style="color: #aaa;">Even geduld, we maken je data schoon</div>
+      </div>
+    </div>
+    <style>@keyframes spin { to { transform: rotate(360deg); } }</style>
+  `;
+  
+  try {
+    // Clear localStorage
+    localStorage.removeItem('marathonProgress');
+    
+    // Clear database if user is logged in
+    if (currentUser) {
+      // Delete training plan
+      await supabase.from('training_plans')
+        .delete()
+        .eq('user_id', currentUser.id);
+      
+      // Delete workout progress
+      await supabase.from('workout_progress')
+        .delete()
+        .eq('user_id', currentUser.id);
+      
+      console.log('✅ Database cleared');
+    }
+    
+    // Reset all state
+    generatedPlan = null;
+    completedWorkouts = new Set();
+    currentWeekNumber = 1;
+    
+    console.log('✅ Plan reset successful');
+    
+    // Show success message briefly
+    document.getElementById('app').innerHTML = `
+      <div style="min-height: 100vh; display: flex; align-items: center; justify-content: center; background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%); color: #eee; padding: 20px;">
+        <div style="background: rgba(78, 204, 163, 0.1); backdrop-filter: blur(10px); border-radius: 20px; padding: 40px; max-width: 600px; text-align: center; border: 1px solid rgba(78, 204, 163, 0.3);">
+          <div style="font-size: 4em; margin-bottom: 20px;">✅</div>
+          <div style="font-size: 1.5em; color: var(--success); margin-bottom: 10px;">Plan Gereset!</div>
+          <div style="color: #aaa;">Je wordt doorgestuurd naar de onboarding...</div>
+        </div>
+      </div>
+    `;
+    
+    // Redirect to onboarding after 1.5 seconds
+    setTimeout(() => {
+      showWelcome();
+    }, 1500);
+    
+  } catch (error) {
+    console.error('Error resetting plan:', error);
+    alert('Er ging iets mis bij het resetten. Probeer opnieuw.');
+    showDashboard();
+  }
 }
 
 console.log('Marathon Trainer FIXED & READY! 🎉');

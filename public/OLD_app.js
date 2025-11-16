@@ -17,6 +17,53 @@ let userData = {
   strengthTraining: false, sleepHours: 7
 };
 
+// ===== DATE HELPERS =====
+const TRAINING_START_DATE = new Date('2025-11-15'); // Zaterdag 15 november 2025
+const RACE_DATE = new Date('2026-09-27'); // Zondag 27 september 2026
+
+function getWeekStartDate(weekNumber) {
+  const date = new Date(TRAINING_START_DATE);
+  date.setDate(date.getDate() + (weekNumber - 1) * 7);
+  return date;
+}
+
+function getWeekEndDate(weekNumber) {
+  const date = getWeekStartDate(weekNumber);
+  date.setDate(date.getDate() + 6);
+  return date;
+}
+
+function getDateForWorkout(weekNumber, dayName) {
+  const dayMap = {
+    'Zaterdag': 0, 'Zondag': 1, 'Maandag': 2, 'Dinsdag': 3,
+    'Woensdag': 4, 'Donderdag': 5, 'Vrijdag': 6
+  };
+  const startDate = getWeekStartDate(weekNumber);
+  const dayOffset = dayMap[dayName] || 0;
+  const date = new Date(startDate);
+  date.setDate(date.getDate() + dayOffset);
+  return date;
+}
+
+function formatDate(date, format = 'short') {
+  const days = ['Zo', 'Ma', 'Di', 'Wo', 'Do', 'Vr', 'Za'];
+  const months = ['jan', 'feb', 'mrt', 'apr', 'mei', 'jun', 'jul', 'aug', 'sep', 'okt', 'nov', 'dec'];
+  
+  if (format === 'short') {
+    return `${days[date.getDay()]} ${date.getDate()} ${months[date.getMonth()]}`;
+  } else if (format === 'range') {
+    return `${date.getDate()} ${months[date.getMonth()]}`;
+  }
+  return date.toLocaleDateString('nl-NL');
+}
+
+function getDaysUntilRace() {
+  const today = new Date();
+  const diffTime = RACE_DATE - today;
+  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+  return diffDays;
+}
+
 // ===== AUTH & DATA LOADING =====
 
 document.addEventListener('DOMContentLoaded', async () => {
@@ -520,6 +567,10 @@ function showDashboard() {
     }
   }
   
+  const weekStart = getWeekStartDate(currentWeekNumber);
+  const weekEnd = getWeekEndDate(currentWeekNumber);
+  const daysUntilRace = getDaysUntilRace();
+  
   document.getElementById('app').innerHTML = `
     <div class="container">
       <div class="header">
@@ -530,7 +581,21 @@ function showDashboard() {
           </div>
         ` : ''}
         <h1>🏃‍♂️ Loch Ness Marathon Trainer</h1>
-        <p class="subtitle">27 september 2026 • Loch Ness, Schotland</p>
+        <p class="subtitle">27 september 2026 • ${daysUntilRace} dagen te gaan! 🎯</p>
+      </div>
+      
+      <!-- WEEK NAVIGATION -->
+      <div class="week-navigation">
+        <button class="week-nav-btn" onclick="changeWeek(-1)" ${currentWeekNumber === 1 ? 'disabled' : ''}>
+          ← Vorige
+        </button>
+        <div class="week-info">
+          <div class="week-number">Week ${currentWeekNumber}</div>
+          <div class="week-dates">${formatDate(weekStart, 'range')} - ${formatDate(weekEnd, 'range')} 2025</div>
+        </div>
+        <button class="week-nav-btn" onclick="changeWeek(1)" ${currentWeekNumber === 45 ? 'disabled' : ''}>
+          Volgende →
+        </button>
       </div>
       
       <!-- SIMPLE 3-COLUMN DASHBOARD -->
@@ -565,7 +630,9 @@ function showDashboard() {
           ${nextWorkout ? `
             <div style="padding: 20px 0;">
               <div style="font-size: 2.5em; text-align: center; margin-bottom: 10px;">${nextWorkout.type}</div>
-              <div style="font-size: 1.2em; color: var(--success); text-align: center; font-weight: 600; margin-bottom: 15px;">${nextWorkout.day}</div>
+              <div style="font-size: 1.2em; color: var(--success); text-align: center; font-weight: 600; margin-bottom: 15px;">
+                ${formatDate(getDateForWorkout(currentWeekNumber, nextWorkout.day), 'short')}
+              </div>
               <div style="color: var(--text-secondary); text-align: center; padding: 0 20px; line-height: 1.6;">${nextWorkout.description}</div>
               <button class="btn" onclick="markWorkoutDone(${currentWeekNumber}, '${nextWorkout.day}')" style="margin-top: 25px; width: calc(100% - 40px); margin-left: 20px;">
                 ✓ Markeer als Gedaan
@@ -618,16 +685,23 @@ function showDashboard() {
           <div><strong>Doel:</strong> ${currentPhase.description} • <strong>Totaal:</strong> ${currentPhase.weeklyMinutes}</div>
         </div>
         <ul class="workout-list" style="padding: 20px;">
-          ${currentPhase.workouts.map(workout => {
+          ${currentPhase.workouts
+            .sort((a, b) => {
+              const order = ['Zaterdag', 'Zondag', 'Maandag', 'Dinsdag', 'Woensdag', 'Donderdag', 'Vrijdag'];
+              return order.indexOf(a.day) - order.indexOf(b.day);
+            })
+            .map(workout => {
             const workoutId = currentWeekNumber + '-' + workout.day;
             const isCompleted = completedWorkouts.has(workoutId);
+            const workoutDate = getDateForWorkout(currentWeekNumber, workout.day);
+            const formattedDate = formatDate(workoutDate, 'short');
             return `
               <li class="workout-item ${isCompleted ? 'completed' : ''}" onclick="toggleWorkout('${workoutId}', event)">
                 <div class="workout-checkbox"></div>
                 <div style="flex: 1;">
                   <div style="display: flex; gap: 10px; margin-bottom: 5px; align-items: center;">
+                    <span class="workout-date">${formattedDate}</span>
                     <span class="workout-type">${workout.type}</span>
-                    <strong>${workout.day}</strong>
                   </div>
                   <div style="color: var(--text-secondary); font-size: 0.9em;">${workout.description || ''}</div>
                 </div>
@@ -699,6 +773,12 @@ function markWorkoutDone(weekNum, day) {
 
 function goToNextWeek() {
   currentWeekNumber++;
+  saveProgress();
+  showDashboard();
+}
+
+function changeWeek(direction) {
+  currentWeekNumber = Math.max(1, Math.min(45, currentWeekNumber + direction));
   saveProgress();
   showDashboard();
 }

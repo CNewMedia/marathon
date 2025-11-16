@@ -108,50 +108,39 @@ async function loadUserData() {
   }
   
   try {
-    const { data: profile } = await supabase
-      .from('user_profiles')
-      .select('*')
-      .eq('id', currentUser.id)
-      .single();
+    // Use Google auth metadata directly - skip user_profiles table
+    userData.name = currentUser.user_metadata?.full_name || currentUser.email.split('@')[0];
     
-    if (profile) {
-      userData.name = profile.name || currentUser.user_metadata?.full_name || currentUser.email.split('@')[0];
-      userData.age = profile.age || '';
-      userData.gender = profile.gender || '';
-      userData.weight = profile.weight || '';
-      userData.height = profile.height || '';
-      userData.experience = profile.experience || '';
-    } else {
-      userData.name = currentUser.user_metadata?.full_name || currentUser.email.split('@')[0];
-      
-      await supabase.from('user_profiles').insert([{
-        id: currentUser.id,
-        email: currentUser.email,
-        name: userData.name
-      }]);
-    }
-    
-    const { data: plans } = await supabase
+    // Load training plan
+    const { data: plans, error: plansError } = await supabase
       .from('training_plans')
       .select('*')
       .eq('user_id', currentUser.id)
       .order('created_at', { ascending: false })
       .limit(1);
     
-    if (plans && plans.length > 0) {
+    if (plansError) {
+      console.error('Error loading plans:', plansError);
+    } else if (plans && plans.length > 0) {
       generatedPlan = plans[0].plan_data;
       currentWeekNumber = plans[0].current_week || 1;
     }
     
-    const { data: progress } = await supabase
+    // Load workout progress
+    const { data: progress, error: progressError } = await supabase
       .from('workout_progress')
       .select('week_number, workout_day')
       .eq('user_id', currentUser.id)
       .eq('completed', true);
     
-    if (progress) {
+    if (progressError) {
+      console.error('Error loading progress:', progressError);
+    } else if (progress) {
       completedWorkouts = new Set(progress.map(p => `${p.week_number}-${p.workout_day}`));
     }
+    
+    // Also load from localStorage as backup
+    loadProgress();
   } catch (error) {
     console.error('Error loading user data:', error);
     loadProgress();
@@ -457,17 +446,6 @@ async function generateAIPlan() {
     
     // FIXED: Save immediately after generating
     await saveProgress();
-    
-    if (currentUser) {
-      await supabase.from('user_profiles').update({
-        name: userData.name,
-        age: userData.age,
-        gender: userData.gender,
-        weight: userData.weight,
-        height: userData.height,
-        experience: userData.experience
-      }).eq('id', currentUser.id);
-    }
     
     showDashboard();
     

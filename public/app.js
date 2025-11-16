@@ -419,9 +419,6 @@ function showOnboardingStep(step) {
     </div>
   `;
 }
-  // ... [Je bestaande onboarding code] ...
-  // Dit deel blijft exact hetzelfde
-}
 
 function selectOption(key, value) {
   userData[key] = value;
